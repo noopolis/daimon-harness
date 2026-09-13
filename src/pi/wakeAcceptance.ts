@@ -55,9 +55,10 @@ export class WakeAcceptanceStore {
   constructor(
     readonly runtimeHomePath: string,
     readonly agentId: string,
-    private readonly fs: WakeAcceptanceFs = new WakeAcceptanceFs(runtimeHomePath)
+    private readonly fs: WakeAcceptanceFs = new WakeAcceptanceFs(runtimeHomePath),
+    causalRunId?: string
   ) {
-    this.runId = resolveRunId();
+    this.runId = resolveRunId(undefined, causalRunId);
   }
 
   getAcceptanceFilePath(): string {

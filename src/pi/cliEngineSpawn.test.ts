@@ -84,6 +84,16 @@ test("Codex renderer rejects a weak policy even when bypassing the parser", () =
   assert.throws(() => renderCodexArgs({ commandArgs: [], codexSandbox: { mode: "danger-full-access", networkAccess: true, webSearch: "enabled" } as never }, "/workspace", "http://127.0.0.1:1/mcp"), /sandbox policy/u);
 });
 
+test("isolated Codex trials can disable ambient instructions only under strict policy", () => {
+  const strict = { mode: "workspace-write", networkAccess: false, webSearch: "disabled" } as const;
+  const baseline = renderCodexArgs({ codexSandbox: strict }, "/workspace", "http://127.0.0.1:1/mcp");
+  assert.equal(baseline.includes("project_doc_max_bytes=0"), false);
+  const isolated = renderCodexArgs({ codexSandbox: strict, codexProjectDocMaxBytes: 0 }, "/workspace", "http://127.0.0.1:1/mcp");
+  assert.ok(isolated.includes("project_doc_max_bytes=0"));
+  assert.throws(() => renderCodexArgs({ codexProjectDocMaxBytes: 0 }, "/workspace", undefined), /strict policy/u);
+  assert.throws(() => renderCodexArgs({ codexSandbox: strict, codexProjectDocMaxBytes: 1 as never }, "/workspace", undefined), /zero byte limit/u);
+});
+
 test("codex strict policy defeats a weakening process environment", () => {
   const previous = process.env.DAIMON_CODEX_SANDBOX;
   try {

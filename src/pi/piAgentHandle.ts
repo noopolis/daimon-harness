@@ -33,7 +33,7 @@ import {
 } from "./piAgentWakeSupport.js";
 import { readMemoryContext, type MemoryPrepareTurnResult, type MemoryRuntime } from "@noopolis/mneme";
 export type { PiSession, PiSessionLike, PiSessionCreator, PiNativeSessionCreator } from "./piAgentWakeSupport.js";
-export type WakeAcceptanceInput = { runWake?: typeof stampTurnInputSubmitted; completeTurn?: typeof stampTurnOutputCompleted; traceTurn?: typeof persistPiTurnTrace; createWakeAcceptance?: (runtimeHomePath: string, agentId: string) => WakeAcceptanceStoreLike; };
+export type WakeAcceptanceInput = { runWake?: typeof stampTurnInputSubmitted; completeTurn?: typeof stampTurnOutputCompleted; traceTurn?: typeof persistPiTurnTrace; createWakeAcceptance?: (runtimeHomePath: string, agentId: string) => WakeAcceptanceStoreLike; causalRunId?: string; };
 export class PiAgentHandle implements AgentHandle {
   private state: AgentStatus["state"] = "idle";
   private lastWakeAt: string | undefined;
@@ -42,6 +42,7 @@ export class PiAgentHandle implements AgentHandle {
   private readonly stampTurnInputSubmitted: typeof stampTurnInputSubmitted;
   private readonly stampTurnOutputCompleted: typeof stampTurnOutputCompleted;
   private readonly persistTrace: typeof persistPiTurnTrace;
+  private readonly causalRunId?: string;
   constructor(
     id: string,
     session: PiSession,
@@ -93,9 +94,10 @@ export class PiAgentHandle implements AgentHandle {
     this.stampTurnInputSubmitted = dependencies.runWake ?? stampTurnInputSubmitted;
     this.stampTurnOutputCompleted = dependencies.completeTurn ?? stampTurnOutputCompleted;
     this.persistTrace = dependencies.traceTurn ?? persistPiTurnTrace;
+    this.causalRunId = dependencies.causalRunId;
     const wakeAcceptance =
       dependencies.createWakeAcceptance?.(runtimeHomePath, id) ??
-      new WakeAcceptanceStore(runtimeHomePath, id);
+      new WakeAcceptanceStore(runtimeHomePath, id, undefined, this.causalRunId);
     this.wakeDeliveryQueue = new PiWakeDeliveryQueue(id, wakeAcceptance);
   }
   async wake(event: WakeEvent): Promise<WakeResult> {
@@ -216,6 +218,7 @@ export class PiAgentHandle implements AgentHandle {
       }
       stage = "causal_input";
       const turnInput = await this.stampTurnInputSubmitted({
+        runId: this.causalRunId,
         agentId: this.id,
         event,
         prepared,
@@ -236,6 +239,7 @@ export class PiAgentHandle implements AgentHandle {
       const outputText = chunks.join("\n").trim();
       stage = "causal_output";
       await this.stampTurnOutputCompleted({
+        runId: this.causalRunId,
         agentId: this.id,
         causeEventId: turnInput.event_id,
         outputText,

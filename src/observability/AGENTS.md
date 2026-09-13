@@ -59,7 +59,7 @@ future callers.
 - Keep generated runtime artifacts under the caller's ignored `.runtime/` tree.
 - `causalEvents.ts` never reads `run_id` or `principal_id` from a WakeEvent,
   a model reply, or any other in-turn data — both are always caller-supplied
-  (`turnCausal.ts` resolves `run_id` from `NOOPOLIS_RUN_ID` and stamps
+  (`turnCausal.ts` uses explicit trusted host context or `NOOPOLIS_RUN_ID` and stamps
   `principal_id` as `agent:<agentId>`, the authenticated agent identity; the
   root operator-control caller stamps `operator:<operatorName>` through
   `controlCausal.ts`). Keep it that way in any future caller. Principal

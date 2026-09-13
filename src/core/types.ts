@@ -6,6 +6,8 @@ export interface AgentStartInput {
   instructions: string;
   workspacePath: string;
   runtimeHomePath: string;
+  /** Trusted host causal identity, fixed per instance; unsupported with memory until its public API accepts context. */
+  causalRunId?: string;
   tools?: string[];
 }
 

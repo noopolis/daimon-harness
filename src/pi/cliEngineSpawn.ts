@@ -33,12 +33,15 @@ export const renderGrokSandboxArgs = (
  * CLI's defaults can otherwise add them even when user config is ignored.
  */
 export const renderCodexArgs = (
-  options: Pick<CliEngineOptions, "commandArgs" | "model" | "reasoningEffort" | "codexSandbox" | "codexSandboxProtectedPaths" | "codexSandboxReadablePaths">,
+  options: Pick<CliEngineOptions, "commandArgs" | "model" | "reasoningEffort" | "codexSandbox" | "codexSandboxProtectedPaths" | "codexSandboxReadablePaths" | "codexProjectDocMaxBytes">,
   cwd: string,
   endpoint: string | undefined,
   sandbox: string = options.codexSandbox?.mode ?? process.env.DAIMON_CODEX_SANDBOX ?? "danger-full-access"
 ): string[] => {
   const strictPolicy = options.codexSandbox;
+  if (options.codexProjectDocMaxBytes !== undefined && (options.codexProjectDocMaxBytes !== 0 || strictPolicy === undefined)) {
+    throw new Error("Disabling Codex ambient instructions requires the strict policy and an exact zero byte limit");
+  }
   if (strictPolicy !== undefined && (strictPolicy.mode !== "workspace-write" || strictPolicy.networkAccess !== false || strictPolicy.webSearch !== "disabled" || Object.keys(strictPolicy).length !== 3)) {
     throw new Error("Codex sandbox policy is Daimon-owned and must be workspace-write with network and web search disabled");
   }
@@ -48,6 +51,7 @@ export const renderCodexArgs = (
     "--ignore-user-config",
     "--ignore-rules",
     "--strict-config",
+    ...(options.codexProjectDocMaxBytes === 0 ? ["-c", "project_doc_max_bytes=0"] : []),
     "-c", "web_search=\"disabled\"",
     "-c", `default_permissions=${JSON.stringify(profileName)}`,
     "-c", renderCodexPermissionProfile(profileName, options.codexSandboxProtectedPaths ?? [], options.codexSandboxReadablePaths ?? [], cwd),
