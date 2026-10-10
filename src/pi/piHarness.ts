@@ -13,6 +13,7 @@ import {
 import { createMemoryRuntime, type MemoryAuthorityConfig } from "@noopolis/mneme";
 
 import type { AgentHandle, AgentHarnessAdapter, AgentStartInput, HarnessModelSpec } from "../core/types.js";
+import { resolveRunId } from "../observability/causalEvents.js";
 
 import { resolvePiHarnessModel } from "./modelConfig.js";
 import { createPiModelRegistry } from "./modelRegistry.js";
@@ -86,6 +87,7 @@ export type PiSessionFactoryInput = Exclude<Parameters<typeof createAgentSession
 export type PiSessionFactory = (input: PiSessionFactoryInput) => Promise<{ session: PiSessionLike }>;
 
 export class PiHarnessAdapter implements AgentHarnessAdapter {
+  static readonly capabilities = Object.freeze({ causalRunId: true, memoryCausalRunId: false });
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly sessionFactory: PiSessionFactory;
@@ -97,6 +99,10 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
   }
 
   async startAgent(input: AgentStartInput): Promise<AgentHandle> {
+    if (input.causalRunId !== undefined && this.options.memory !== undefined) {
+      throw new Error("Per-agent causalRunId requires a memory runtime with explicit causal context; configured memory is currently unsupported");
+    }
+    const causalRunId = input.causalRunId === undefined ? undefined : resolveRunId(undefined, input.causalRunId);
     validatePiRawTrainingCaptureOptions(this.options.rawTrainingCapture);
     await ensureRuntimeHome(input.runtimeHomePath);
     await Promise.all([".config", ".local/share", ".local/state", ".cache", ".tmp", "tool-state"]
@@ -215,7 +221,7 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
         },
         memory,
         memoryToolContext,
-        {},
+        { causalRunId },
         worldToolContext,
         rawTrainingCaptureRef,
         this.options.rawTrainingCapture,
@@ -245,7 +251,7 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
       },
       memory,
       memoryToolContext,
-      {},
+      { causalRunId },
       worldToolContext,
       undefined,
       undefined,

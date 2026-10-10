@@ -55,12 +55,12 @@ export const TURN_OUTPUT_COMPLETED_TYPE = "turn.output.completed" as const;
 export const NOOPOLIS_RUN_ID_ENV = "NOOPOLIS_RUN_ID";
 
 /**
- * Resolves `run_id` from the `NOOPOLIS_RUN_ID` environment variable, per
- * `specs/CAUSAL.md`. Never derived from a WakeEvent, model output, or any
+ * Resolves `run_id` from explicit trusted host context or the historical
+ * `NOOPOLIS_RUN_ID` environment fallback. Never derived from a WakeEvent, model output, or any
  * other in-turn data. A causal event cannot be emitted without a real run id.
  */
-export const resolveRunId = (env: NodeJS.ProcessEnv = process.env): string => {
-  const value = env[NOOPOLIS_RUN_ID_ENV];
+export const resolveRunId = (env: NodeJS.ProcessEnv = process.env, explicitRunId?: string): string => {
+  const value = explicitRunId ?? env[NOOPOLIS_RUN_ID_ENV];
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${NOOPOLIS_RUN_ID_ENV} must be set to a non-blank value`);
   }

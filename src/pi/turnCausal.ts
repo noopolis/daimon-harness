@@ -27,6 +27,7 @@ export interface StampTurnInputSubmittedInput {
   prepared?: MemoryPrepareTurnResult;
   promptText: string;
   runtimeHomePath: string;
+  runId?: string;
 }
 
 /**
@@ -64,8 +65,8 @@ export interface StampTurnInputSubmittedInput {
  *   the actual `event_id`s of the `memory.recalled` events it appended for
  *   this turn, so this cause link is id-joined the same way the moltnet
  *   link above is.
- * - `run_id` always comes from `resolveRunId()` (`NOOPOLIS_RUN_ID`), never
- *   from `event` or model output.
+ * - `run_id` comes from trusted per-instance host context, with the historical
+ *   environment fallback. Never from `event` or model output.
  */
 export const stampTurnInputSubmitted = (
   input: StampTurnInputSubmittedInput
@@ -77,7 +78,7 @@ export const stampTurnInputSubmitted = (
     inputMessageIds: [input.event.id],
     principalId: agentPrincipalId(input.agentId),
     promptSha256: summarizePrompt(input.promptText).sha256,
-    runId: resolveRunId(),
+    runId: resolveRunId(undefined, input.runId),
     runtimeHomePath: input.runtimeHomePath,
     turnId: input.event.id
   });
@@ -88,6 +89,7 @@ export interface StampTurnOutputCompletedInput {
   outputText: string;
   runtimeHomePath: string;
   turnId: string;
+  runId?: string;
 }
 
 /**
@@ -105,7 +107,7 @@ export const stampTurnOutputCompleted = (
     causeEventIds: [input.causeEventId],
     outputSha256: sha256Hex(input.outputText),
     principalId: agentPrincipalId(input.agentId),
-    runId: resolveRunId(),
+    runId: resolveRunId(undefined, input.runId),
     runtimeHomePath: input.runtimeHomePath,
     turnId: input.turnId
   });

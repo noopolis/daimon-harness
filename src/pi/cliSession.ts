@@ -94,6 +94,8 @@ export type CliEngineOptions = {
   readonly codexSandboxProtectedPaths?: readonly string[];
   /** Internal production boundary: own non-secret runtime paths a strict Codex turn may read. */
   readonly codexSandboxReadablePaths?: readonly string[];
+  /** Strict isolated trials may disable native ambient AGENTS.md discovery. */
+  readonly codexProjectDocMaxBytes?: 0;
   /**
    * Advisory per-turn metering sink for the engines whose headless stream
    * reports token usage and that do not run behind the Grok engine broker

@@ -18,6 +18,14 @@ instructions, workspace path, runtime home, and optional tool names. The
 returned handle accepts one `WakeEvent` at a time and returns text, duration,
 and status.
 
+An isolated host can supply `AgentStartInput.causalRunId`. This trusted value is
+fixed for the agent instance and used by its wake acceptance and causal turn
+records; it is never taken from a wake body or model output. Omitting it keeps
+the existing `NOOPOLIS_RUN_ID` environment behavior. Explicit context with
+configured Mneme memory currently fails before startup because Mneme's public
+runtime does not yet accept per-instance causal context. Check
+`PiHarnessAdapter.capabilities.causalRunId` before relying on this integration.
+
 ## Pi
 
 `@noopolis/daimon/pi` exports `PiHarnessAdapter` and helpers for Pi auth,
@@ -74,6 +82,12 @@ Codex may still defer declared tools behind `tool_search`. Server startup and
 tool discovery are separate checks; `list_mcp_resources` does not list tools.
 Codex 0.142.3 accepts the two isolation settings above, but its former
 `tool_search` feature toggle is a removed no-op and cannot disable discovery.
+
+Public `createCliSessionFactory` callers running isolated experiments can select
+`codexProjectDocMaxBytes: 0` with the strict `codexSandbox` policy. This disables
+Codex's implicit instruction-file discovery so the host can supply its exact
+`identityPrompt` without ambient project/home instructions. A nonzero value or
+use without strict policy is rejected. Existing production defaults are unchanged.
 
 The production Grok path uses an external Daimon engine broker with one durable
 subscription credential authority. Agent workers receive scoped capabilities;
