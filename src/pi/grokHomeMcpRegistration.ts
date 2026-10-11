@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { renderGrokLeanBaseConfig } from "../runtime/grokBrokerWorkerConfig.js";
 import type { CliMcpRegistration } from "./cliMcpRegistration.js";
+import { grokTaskClockConfig } from "./engineTaskClock.js";
 
 /**
  * Per-wake MCP registration for the direct (non-broker) Grok CLI path.
@@ -27,7 +28,7 @@ export async function registerGrokHomeMcpServer(input: Readonly<{ engineHomePath
   }
   if (!/^http:\/\/127\.0\.0\.1:\d{1,5}\/[A-Za-z0-9/_-]*$/u.test(input.endpoint)) throw new Error("Grok MCP endpoint must be a loopback http URL");
   await input.verify?.();
-  await writeConfig(home, `${renderGrokLeanBaseConfig()}[mcp_servers.daimon]\nurl = ${JSON.stringify(input.endpoint)}\n`);
+  await writeConfig(home, `${grokTaskClockConfig()}${renderGrokLeanBaseConfig()}[mcp_servers.daimon]\nurl = ${JSON.stringify(input.endpoint)}\n`);
   let closePromise: Promise<void> | undefined;
   return {
     close: (): Promise<void> => closePromise ??= (async () => {

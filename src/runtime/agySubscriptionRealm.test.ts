@@ -55,7 +55,10 @@ test("accepts only one caller-owned 0600 bounded unlock file and redacts failure
   }
 });
 
-test("starts, unlocks through stdin, cleans ephemeral state, and preserves durable state", async () => {
+test("starts, unlocks through stdin, cleans ephemeral state, and preserves durable state", async (t) => {
+  const previousEnvironment = process.env;
+  process.env = { ...previousEnvironment, NOOPOLIS_TASK_CLOCK: JSON.stringify({ version: "noopolis.task-clock.v1", origin: "2001-01-01T00:00:00Z", anchorEpochMs: Date.now() }), LD_PRELOAD: "/missing/libfaketime.so.1", FAKETIME: "stale" };
+  t.after(() => { process.env = previousEnvironment; });
   const fixture = await createRealmFixture();
   try {
     const realm = await startAgySubscriptionRealm(fixture.options);

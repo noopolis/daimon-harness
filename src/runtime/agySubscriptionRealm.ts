@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { spawn, type ChildProcess } from "./taskClockProcess.js";
+import { spawnRealTime as spawn, type ChildProcess } from "./taskClockProcess.js";
 import { chmod, lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";

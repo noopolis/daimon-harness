@@ -35,12 +35,17 @@ test("host rejects invalid clock or conflicting MCP declarations before prefligh
   await assert.rejects(conflict.start(), /conflicts with MNEME_CLOCK_ANCHOR_MS/u);
   assert.equal(sideEffects, 0);
 });
-test("task time fails closed for native broker workers whose fixed environment cannot carry the contract", async (t) => {
+test("native broker clock gaps are reported without refusing readiness or dispatch", async (t) => {
   environment(t);
   const value = config(); value.agents[0]!.engine = { kind: "grok" };
   const parsed = parseOrganizationRuntimeConfig(value);
-  await assert.rejects(prepareProductionReadiness(parsed), /NOOPOLIS_TASK_CLOCK.*native Grok engine broker/u);
-  await assert.rejects(startOrganizationRuntimeEngine(parsed.agents[0]!, "CLOCK_TEST_TOKEN", undefined, undefined, {} as EngineBrokerTurnClient), /NOOPOLIS_TASK_CLOCK.*native Grok engine broker/u);
+  const warning = t.mock.method(console, "warn", () => {});
+  // These intentionally absent production roots fail ordinary readiness, not clock coverage.
+  await assert.rejects(prepareProductionReadiness(parsed), (error: Error) => !error.message.includes("NOOPOLIS_TASK_CLOCK"));
+  const paths = { verify: async () => { throw new Error("path readiness reached"); } };
+  await assert.rejects(startOrganizationRuntimeEngine(parsed.agents[0]!, "CLOCK_TEST_TOKEN", paths as never, undefined, {} as EngineBrokerTurnClient), /path readiness reached/u);
+  assert.equal(warning.mock.callCount(), 2);
+  for (const call of warning.mock.calls) assert.match(call.arguments[0], /engine=grok.*wake allowed/u);
 });
 test("schedule delays remain real while durable occurrences and delivery IDs use task time", { timeout: 5000 }, async (t) => {
   environment(t);

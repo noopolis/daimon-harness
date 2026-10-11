@@ -1,5 +1,5 @@
 import childProcess, { type SpawnOptions } from "node:child_process";
-import { readTaskClock, taskClockChildEnvironment, taskClockProcessEnvironment, type TaskClock } from "./taskClock.js";
+import { readTaskClock, realTimeProcessEnvironment, taskClockChildEnvironment, taskClockProcessEnvironment, type TaskClock } from "./taskClock.js";
 
 export type { ChildProcess } from "node:child_process";
 /** @internal Synchronous injection seam; never runtime configuration. */
@@ -49,9 +49,16 @@ export function readyTaskClockEnvironment(
   return env;
 }
 
-/** All Daimon-owned spawn paths use the same readiness gate. Probe children are the sole exception. */
+/** Only agent-facing tool/server children cross the shifted readiness gate. */
 export const spawn: typeof childProcess.spawn = ((command: string, args?: readonly string[] | SpawnOptions, options?: SpawnOptions) => {
   const argv = Array.isArray(args) ? args : [];
   const settings = (Array.isArray(args) ? options : args ?? options) as SpawnOptions | undefined;
   return childProcess.spawn(command, argv, { ...settings, env: readyTaskClockEnvironment(settings?.env ?? process.env) });
+}) as typeof childProcess.spawn;
+
+/** Engine CLIs and operational helpers stay real; no libfaketime probe runs here. */
+export const spawnRealTime: typeof childProcess.spawn = ((command: string, args?: readonly string[] | SpawnOptions, options?: SpawnOptions) => {
+  const argv = Array.isArray(args) ? args : [];
+  const settings = (Array.isArray(args) ? options : args ?? options) as SpawnOptions | undefined;
+  return childProcess.spawn(command, argv, { ...settings, env: realTimeProcessEnvironment(settings?.env ?? process.env) });
 }) as typeof childProcess.spawn;

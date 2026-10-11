@@ -1,3 +1,4 @@
+import { reportEngineTaskClockGap } from "../pi/engineTaskClock.js";
 import { startAgySubscriptionRealm, type AgySubscriptionRealm } from "./agySubscriptionRealm.js";
 import { prepareEngineExecutable, verifyAgySubscriptionEnrollment } from "./engineReadiness.js";
 import { readTaskClock } from "./taskClock.js";
@@ -18,8 +19,8 @@ export async function prepareProductionReadiness(
   config: OrganizationRuntimeConfig
 ): Promise<OrganizationRuntimeHostReadiness> {
   const clock = readTaskClock();
+  for (const agent of config.agents) reportEngineTaskClockGap(agent.engine.kind, agent.engine.kind === "grok");
   if (config.agents.some((agent) => agent.memory !== undefined)) memoryClockOptions(clock);
-  if (clock !== undefined && config.agents.some((agent) => agent.engine.kind === "grok")) throw new Error("NOOPOLIS_TASK_CLOCK requires task-clock environment support in the native Grok engine broker; this broker does not support it");
   const paths = await prepareOrganizationRuntimePaths(config.agents);
   let realm: AgySubscriptionRealm | undefined;
   let grokBroker: EngineBrokerControlClient | undefined;

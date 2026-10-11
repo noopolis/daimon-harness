@@ -1,3 +1,4 @@
+import { taskClockChildEnvironment } from "../runtime/taskClock.js";
 import childProcess from "node:child_process";
 import { resetTaskClockProcessForTest } from "../runtime/taskClockProcess.js";
 import assert from "node:assert/strict";
@@ -31,7 +32,7 @@ test("startup probe uses sentinel then real offset with date argv and the CLI ch
   await verifyTaskClockProcess("/runtime", undefined, (command, args, env) => {
     calls++;
     assert.equal(command, "/bin/date"); assert.deepEqual(args, ["-u", "+%s"]);
-    assert.deepEqual(env, { ...cliChildEnvironment([], "/runtime"), ...(calls === 1 ? { FAKETIME: "-31536000" } : {}) });
+    assert.deepEqual(env, { ...cliChildEnvironment([], "/runtime"), ...taskClockChildEnvironment(), ...(calls === 1 ? { FAKETIME: "-31536000" } : {}) });
     return shifted(command, args, env);
   });
   assert.equal(calls, 2);

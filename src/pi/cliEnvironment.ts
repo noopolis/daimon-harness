@@ -1,5 +1,5 @@
 import path from "node:path";
-import { taskClockChildEnvironment } from "../runtime/taskClock.js";
+import { readTaskClock } from "../runtime/taskClock.js";
 
 type CliEnvironmentIntent = Readonly<{
   dbusSessionBusAddress?: string;
@@ -15,11 +15,11 @@ export const DAIMON_WAKE_ID_ENV = "DAIMON_WAKE_ID" as const;
 export const cliChildEnvironment = (
   _redactedNames: readonly string[], runtimeHomePath?: string, intent: CliEnvironmentIntent = {}
 ): NodeJS.ProcessEnv => {
-  const clockEnvironment = taskClockChildEnvironment();
+  readTaskClock(); // Validate the contract, but provider CLIs always run on real time.
   if (runtimeHomePath === undefined) {
     // This legacy branch is only used by the standalone Pi helpers, which do
     // not claim production organization-runtime isolation.
-    return { PATH: process.env.PATH, LANG: process.env.LANG ?? "C", LC_ALL: process.env.LC_ALL ?? "C", TZ: process.env.TZ ?? "UTC", ...clockEnvironment };
+    return { PATH: process.env.PATH, LANG: process.env.LANG ?? "C", LC_ALL: process.env.LC_ALL ?? "C", TZ: process.env.TZ ?? "UTC" };
   }
   const engine = intent.engine;
   const engineVariable = engine === "codex" ? "CODEX_HOME" : engine === "grok" ? "GROK_HOME" : engine === "agy" ? "ANTIGRAVITY_CLI_HOME" : undefined;
@@ -38,7 +38,6 @@ export const cliChildEnvironment = (
     XDG_STATE_HOME: `${runtimeHomePath}/.local/state`,
     XDG_CACHE_HOME: `${runtimeHomePath}/.cache`,
     TMPDIR: `${runtimeHomePath}/.tmp`,
-    ...clockEnvironment,
     ...(engineVariable === undefined || engineHome === undefined ? {} : { [engineVariable]: engineHome }),
     ...(keyringBus === undefined ? {} : { DBUS_SESSION_BUS_ADDRESS: keyringBus }),
     ...(intent.wakeId === undefined ? {} : { [DAIMON_WAKE_ID_ENV]: intent.wakeId })

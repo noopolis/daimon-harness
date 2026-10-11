@@ -1,5 +1,4 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { createHash } from "node:crypto";
 import { readTaskClock } from "./taskClock.js";
 
 import type { AttentionConfig } from "../contracts/attentionContract.js";
@@ -14,6 +13,16 @@ export type AttentionTurn = Readonly<{
 /** Owned by one control host; never shared across hosts or agent identities. */
 export type AttentionRegistry = Map<string, AttentionTurn>;
 
+/** Envelope time is Daimon's view of now; text may contain historical Moltnet data.
+ * Native schedule occurrences already use the task calendar and must not shift twice.
+ */
+export function taskClockAttentionMessages<T extends { kind: string; occurred_at: string }>(messages: readonly T[]): readonly T[] {
+  const clock = readTaskClock();
+  if (clock === undefined) return messages;
+  const now = new Date(clock.now()).toISOString();
+  return messages.map((message) => message.kind === "schedule" ? message : { ...message, occurred_at: now });
+}
+
 export function attentionTools(agentId: string, registry: AttentionRegistry): ToolDefinition[] {
   const current = (): AttentionTurn => { const turn = registry.get(agentId); if (!turn) throw new Error("No active inbox turn"); return turn; };
   return [{
@@ -22,9 +31,10 @@ export function attentionTools(agentId: string, registry: AttentionRegistry): To
     async execute() {
       const turn = current();
       const budget = await turn.budget();
-      const visibleBudget = readTaskClock() !== undefined && budget !== null && typeof budget === "object" && "epoch" in budget && typeof budget.epoch === "string"
-        ? { ...budget, epoch: `budget-${createHash("sha256").update(budget.epoch).digest("hex")}` } : budget;
-      const details = { version: "noopolis.daimon.inbox.v1", execution_id: turn.executionId, messages: turn.messages, budget: visibleBudget };
+      const clock = readTaskClock();
+      const visibleBudget = clock !== undefined && budget !== null && typeof budget === "object" && "epoch" in budget && typeof budget.epoch === "string"
+        ? { ...budget, epoch: budget.epoch.replace(/^(organization-[a-f0-9]{64}-)\d{4}-\d{2}-\d{2}$/u, `$1${new Date(clock.now()).toISOString().slice(0, 10)}`) } : budget;
+      const details = { version: "noopolis.daimon.inbox.v1", execution_id: turn.executionId, messages: taskClockAttentionMessages(turn.messages), budget: visibleBudget };
       return { content: [{ type: "text", text: JSON.stringify(details) }], details };
     }
   }, {

@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import { createProductionAgentTools } from "./productionAgentTools.js";
 import type { OrganizationRuntimeAgentConfig } from "./organizationRuntime.js";
-import { cliChildEnvironment } from "../pi/cliEnvironment.js";
 import { readTaskClock } from "./taskClock.js";
 
 const raw = '{"version":"noopolis.task-clock.v1","origin":"2024-02-29T12:00:00+02:00","anchorEpochMs":1800000000123}';
@@ -36,8 +35,6 @@ test("MCP discovery and call children receive only the process clock with no sec
     const [tool] = await createProductionAgentTools({ ...agent, mcp: [{ ...server, env }] }, { current: `wake-${Object.keys(env).length}` });
     const result = await tool!.execute("call", {}, undefined, undefined, {} as never);
     assert.deepEqual(result.details, expected);
-    const cli = cliChildEnvironment([], agent.runtimeHomePath);
-    for (const name of Object.keys(expected)) assert.equal((result.details as Record<string, string>)[name], cli[name]);
   }
   delete process.env.NOOPOLIS_TASK_CLOCK;
   const [tool] = await createProductionAgentTools({ ...agent, mcp: [{ ...server, env: declared }] }, { current: "unset" });

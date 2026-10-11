@@ -1,4 +1,4 @@
-import { spawn } from "./taskClockProcess.js";
+import { spawnRealTime as spawn } from "./taskClockProcess.js";
 
 import { cliChildEnvironment } from "../pi/cliEnvironment.js";
 import { startAgySubscriptionRealm, type AgySubscriptionRealm } from "./agySubscriptionRealm.js";

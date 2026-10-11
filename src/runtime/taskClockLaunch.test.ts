@@ -5,8 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
-import { spawnEngine, createCliSessionFactory } from "../pi/cliSession.js";
-import { readChild } from "../pi/cliChildOutput.js";
+import { createCliSessionFactory } from "../pi/cliSession.js";
 import { createProductionAgentTools } from "./productionAgentTools.js";
 import { createScriptedMcpActions } from "./testRuntimeMcpActions.js";
 import { createScriptedMoltnetActions } from "./testRuntimeMoltnetActions.js";
@@ -38,23 +37,11 @@ const missingLibrary = "/definitely-missing/libfaketime.so.1";
 const refused = /NOOPOLIS_TASK_CLOCK:.*refusing clocked execution/u;
 
 for (const engine of ["codex", "grok", "agy"] as const) {
-  test(`exported spawnEngine refuses ${engine} without verified interposition before spawning`, async (t) => {
-    const rig = await fixture(t);
-    await writeFile(rig.command, `#!${process.execPath}\n${rig.capture}\nconsole.log('unclocked child');`); await chmod(rig.command, 0o700);
-    for (const preload of [undefined, missingLibrary]) {
-      rig.clock(preload);
-      await assert.rejects(async () => {
-        const child = spawnEngine({ engine, command: rig.command }, "work", { cwd: rig.root }, undefined);
-        await readChild(child, 1000, []);
-      }, refused);
-      await assert.rejects(access(rig.marker), /ENOENT/u);
-    }
-  });
-  test(`standalone ${engine} CLI sessions refuse before registration, mounts or engine children`, async (t) => {
+  test(`standalone ${engine} CLI sessions reach their MCP mount without clock interposition`, async (t) => {
     const rig = await fixture(t); rig.clock(missingLibrary);
     let mounted = false;
-    const { session } = await createCliSessionFactory({ engine, command: rig.command, onToolsMounted: () => { mounted = true; } })({ cwd: rig.root } as never);
-    try { await assert.rejects(session.prompt("work"), refused); assert.equal(mounted, false); }
+    const { session } = await createCliSessionFactory({ engine, command: rig.command, onToolsMounted: () => { mounted = true; throw new Error("mount reached"); } })({ cwd: rig.root } as never);
+    try { await assert.rejects(session.prompt("work"), /mount reached/u); assert.equal(mounted, true); }
     finally { await session.dispose(); }
     await assert.rejects(access(rig.marker), /ENOENT/u);
   });

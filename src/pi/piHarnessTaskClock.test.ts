@@ -1,3 +1,4 @@
+import { taskClockChildEnvironment } from "../runtime/taskClock.js";
 import { resetTaskClockProcessForTest } from "../runtime/taskClockProcess.js";
 import assert from "node:assert/strict";
 import { access, mkdtemp, rm } from "node:fs/promises";
@@ -55,7 +56,7 @@ test("startup probes sentinel and offset once and Pi bash receives only the proc
   const adapter = new PiHarnessAdapter({ authPath: path.join(root, "auth.json"), model, sessionFactory: factory }, (command, args, env) => {
     probes++;
     assert.equal(command, "/bin/date"); assert.deepEqual(args, ["-u", "+%s"]);
-    assert.deepEqual(env, { ...cliChildEnvironment([], input.runtimeHomePath), ...(probes === 1 ? { FAKETIME: "-31536000" } : {}) });
+    assert.deepEqual(env, { ...cliChildEnvironment([], input.runtimeHomePath), ...taskClockChildEnvironment(), ...(probes === 1 ? { FAKETIME: "-31536000" } : {}) });
     return String(Math.floor((now + Number(env.FAKETIME) * 1000) / 1000));
   });
   const handle = await adapter.startAgent(input);

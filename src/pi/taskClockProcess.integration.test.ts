@@ -11,7 +11,7 @@ import { readChild } from "./cliChildOutput.js";
 import { readTaskClock } from "../runtime/taskClock.js";
 import { createProductionAgentTools } from "../runtime/productionAgentTools.js";
 
-test("libfaketime changes actual CLI, MCP, Pi bash and descendant clocks across staggered starts", { timeout: 15000 }, async (t) => {
+test("libfaketime shifts MCP, Pi bash and descendants while engine CLIs stay real", { timeout: 15000 }, async (t) => {
   if (process.platform !== "linux") { t.skip("requires caller-installed Linux libfaketime; macOS does not support LD_PRELOAD"); return; }
   let library: string | undefined;
   for (const candidate of [process.env.DAIMON_TEST_LIBFAKETIME, "/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1", "/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1", "/usr/local/lib/faketime/libfaketime.so.1"]) {
@@ -39,7 +39,8 @@ test("libfaketime changes actual CLI, MCP, Pi bash and descendant clocks across 
   await writeFile(command, `#!${process.execPath}\n${observation}`); await chmod(command, 0o700);
   for (const engine of ["codex", "grok", "agy"] as const) {
     const child = spawnEngine({ engine, command }, "hello", { cwd: root, runtimeHomePath: root }, undefined);
-    check(JSON.parse(await readChild(child, 5000, [])));
+    const result = JSON.parse(await readChild(child, 5000, []));
+    for (const value of [result.languageMs, result.dateSeconds * 1000]) assert.ok(Math.abs(value - Date.now()) < 5000, "engine and unconfigured descendants stay real");
     await delay(1100);
   }
   const agent = { id: "a", name: "A", instructions: "test", workspacePath: root, runtimeHomePath: root, engine: { kind: "codex" as const } };
@@ -55,6 +56,6 @@ test("libfaketime changes actual CLI, MCP, Pi bash and descendant clocks across 
   const handle = await adapter.startAgent(agent);
   try { await handle.wake({ id: "one", kind: "manual", text: "observe" }); await delay(1100); await handle.wake({ id: "two", kind: "manual", text: "observe" }); }
   finally { await handle.stop(); }
-  assert.ok(observed.at(-1)! - observed[0]! >= 4000, "relative offsets must not restart the clock in each process");
+  assert.ok(observed.at(-1)! - observed[0]! >= 1000, "relative offsets must not restart the clock in each process");
   assert.ok(Math.abs(Date.now() - anchor) < 15000, "Daimon's accounting clock stays real");
 });

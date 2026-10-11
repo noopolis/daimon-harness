@@ -1,4 +1,4 @@
-import { spawn,type ChildProcess } from "./taskClockProcess.js";
+import { spawnRealTime as spawn,type ChildProcess } from "./taskClockProcess.js";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import path from "node:path";

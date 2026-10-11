@@ -6,7 +6,7 @@ import test from "node:test";
 import { attentionTools, type AttentionRegistry } from "./attention.js";
 import { WakeFuse, type WakeBudgetSnapshot } from "./wakeFuse.js";
 
-test("inbox exposes a stable opaque epoch while fuse accounting and rollover stay real", async (t) => {
+test("inbox renders the task date in the existing epoch shape while fuse rollover stays real", async (t) => {
   const previous = process.env;
   let realNow = Date.parse("2026-10-11T12:00:00Z");
   process.env = { ...previous, NOOPOLIS_TASK_CLOCK: JSON.stringify({ version: "noopolis.task-clock.v1", origin: "2001-01-01T23:59:00Z", anchorEpochMs: realNow }) };
@@ -26,7 +26,7 @@ test("inbox exposes a stable opaque epoch while fuse accounting and rollover sta
   };
   const internal = await fuse.snapshot("a"), visible = await read();
   assert.match(internal.epoch, /2026-10-11$/u);
-  assert.match(visible.epoch, /^budget-[a-f0-9]{64}$/u);
+  assert.equal(visible.epoch, internal.epoch.replace("2026-10-11", "2001-01-01"));
   assert.notEqual(visible.epoch, internal.epoch);
   assert.deepEqual({ ...visible, epoch: internal.epoch }, internal);
   assert.equal(visible.state, "paused");
@@ -34,7 +34,7 @@ test("inbox exposes a stable opaque epoch while fuse accounting and rollover sta
   await tools[1]!.execute("complete", { delivery_id: "delivery", disposition: "complete" }, undefined, undefined, {} as never);
   assert.deepEqual(dispositions, ["delivery"]);
   realNow += 120000; t.mock.timers.setTime(realNow); // Task midnight does not renew the operator's budget.
-  assert.equal((await read()).epoch, visible.epoch);
+  assert.equal((await read()).epoch, visible.epoch.replace("2001-01-01", "2001-01-02"));
   assert.equal((await fuse.snapshot("a")).state, "paused");
   realNow = Date.parse("2026-10-12T00:00:00Z"); t.mock.timers.setTime(realNow);
   const renewed = await read();

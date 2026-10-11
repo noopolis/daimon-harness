@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AttentionRegistry } from "./attention.js";
+import { taskClockAttentionMessages, type AttentionRegistry } from "./attention.js";
 import type { OrganizationRuntimeAgentConfig, OrganizationRuntimeHost, OrganizationRuntimeWakeResult } from "./organizationRuntime.js";
 import { engineFailureDetail } from "./organizationRuntimeHost.js";
 import { WakeAcceptanceStore, WakeExecutionClaimLostError, type WakeExecutionClaim } from "./wakeAcceptanceStore.js";
@@ -132,30 +132,30 @@ export class AttentionDispatcher {
       }).catch((error) => this.failClosed(agent.id, error));
     }, store.claimHeartbeatIntervalMs());
     this.active.set(agent.id, { execution_id: agent.attention === undefined ? claimed[0]!.record.delivery_id : executionId, delivery_ids: claimed.map((item) => item.record.delivery_id) });
-    const messages = claimed.map(({ record }) => ({ acceptance_id: record.acceptance_id, delivery_id: record.delivery_id, ...record.event }));
-    if (agent.attention !== undefined) registry.set(agent.id, {
-      executionId, messages, budget: () => fuse.snapshot(agent.id, agent.attention),
-      disposition: (deliveryId, disposition) => serialize(async () => {
-        const item = claimed.find((value) => value.record.delivery_id === deliveryId);
-        if (!item) throw new Error("Delivery is outside this agent's selected inbox turn");
-        if (item.done && item.record.state === "completed") {
-          if (disposition !== "complete") throw new Error("A completed delivery cannot be deferred");
-          return;
-        }
-        if (item.done && disposition === "defer") return;
-        item.record = await store.transitionClaimed(item.record.acceptance_id, item.claim, disposition === "complete" ? "completed" : "accepted", undefined, disposition === "complete" ? "" : undefined, disposition === "defer" ? { deferred: true, clear_execution: true, execution_error: null } : { execution_id: executionId, deferred: false, execution_error: null });
-        item.done = true;
-      })
-    });
     let result: OrganizationRuntimeWakeResult;
     try {
+      const messages = taskClockAttentionMessages(claimed.map(({ record }) => ({ acceptance_id: record.acceptance_id, delivery_id: record.delivery_id, ...record.event })));
+      if (agent.attention !== undefined) registry.set(agent.id, {
+        executionId, messages, budget: () => fuse.snapshot(agent.id, agent.attention),
+        disposition: (deliveryId, disposition) => serialize(async () => {
+          const item = claimed.find((value) => value.record.delivery_id === deliveryId);
+          if (!item) throw new Error("Delivery is outside this agent's selected inbox turn");
+          if (item.done && item.record.state === "completed") {
+            if (disposition !== "complete") throw new Error("A completed delivery cannot be deferred");
+            return;
+          }
+          if (item.done && disposition === "defer") return;
+          item.record = await store.transitionClaimed(item.record.acceptance_id, item.claim, disposition === "complete" ? "completed" : "accepted", undefined, disposition === "complete" ? "" : undefined, disposition === "defer" ? { deferred: true, clear_execution: true, execution_error: null } : { execution_id: executionId, deferred: false, execution_error: null });
+          item.done = true;
+        })
+      });
       const first = claimed[0]!.record;
       if (agent.recording) {
         await recordWakeMoment(agent, agent.attention === undefined ? first.delivery_id : executionId, claimed.map(({ record }) => record), { ...this.options.recordingOptionsForTest, verifyStore: () => verifyHostRecordingStore(host, agent.id) });
       }
       result = await wakeFromDurableInbox(host, { token, agentId: agent.id, event: {
         version: "noopolis.daimon.wake.v1", id: agent.attention === undefined ? first.delivery_id : executionId, kind: first.event.kind,
-        occurredAt: first.event.occurred_at,
+        occurredAt: messages[0]!.occurred_at,
         text: agent.attention === undefined ? first.event.text : inboxPrompt(messages, agent.engine.kind, agent.attention.maxBatchBytes)
       } });
     } catch (error) {

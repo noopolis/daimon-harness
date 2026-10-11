@@ -1,4 +1,4 @@
-import { spawn } from "./taskClockProcess.js";
+import { spawnRealTime as spawn } from "./taskClockProcess.js";
 import { redactCredentialText } from "../core/credentialRedaction.js";
 import { boundedDiagnosticWindow, CLI_ENGINE_MAX_DIAGNOSTIC_BYTES } from "../pi/cliChildOutput.js";
 import { terminateChild, trackCliChild } from "../pi/cliProcess.js";

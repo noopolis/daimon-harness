@@ -80,6 +80,12 @@ function clockVariable(name: string): boolean {
   return /^(?:LD_PRELOAD$|DYLD_|FAKETIME|NOOPOLIS_TASK_CLOCK$|MNEME_CLOCK_)/u.test(name);
 }
 
+/** Provider/auth/control processes must never inherit the agent's process clock. */
+export function realTimeProcessEnvironment(inherited: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (readTaskClock() === undefined) return inherited;
+  return Object.fromEntries(Object.entries(inherited).filter(([name]) => !clockVariable(name)));
+}
+
 /** Reject mixed loader lists: unrelated libraries must never ride this exception. */
 export function taskClockPreload(value: string | undefined): string | undefined {
   const libraries = value?.split(/[\s:]+/u).filter(Boolean);

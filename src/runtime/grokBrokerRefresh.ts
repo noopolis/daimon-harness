@@ -1,4 +1,4 @@
-import { spawn } from "./taskClockProcess.js";
+import { spawnRealTime as spawn } from "./taskClockProcess.js";
 import { readChild } from "../pi/cliChildOutput.js";
 import { terminateChild, trackCliChild } from "../pi/cliProcess.js";
 

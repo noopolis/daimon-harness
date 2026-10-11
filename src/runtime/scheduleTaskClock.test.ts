@@ -15,12 +15,14 @@ async function fixture(t: TestContext, origin: string, timezone: string, cron: s
   else delete process.env.NOOPOLIS_TASK_CLOCK;
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-cron-clock-"));
   let realNow = realAnchor;
+  // All task-clock consumers share this real instant, including inbox rendering.
+  t.mock.timers.enable({ apis: ["Date"], now: realNow });
   const controls: ReturnType<typeof createOrganizationRuntimeControlHostWithCoreForTest>[] = [];
   t.after(async () => { for (const control of controls) await control.stop(); process.env = previous; await rm(root, { recursive: true, force: true }); });
   const schedule = intervalMs === undefined ? { kind: "cron", cron, timezone, prompt: "work" } : { kind: "every", interval_ms: intervalMs, prompt: "work" };
   const config = { version: "noopolis.daimon.organization-runtime.v2", host: { bindHost: "127.0.0.1", port: 4318, controlTokenEnv: "CLOCK_TEST_TOKEN" }, agents: [{ id: "a", name: "A", instructions: "test", workspacePath: path.join(root, "workspace"), runtimeHomePath: path.join(root, "home"), engine: { kind: "codex" }, attention: {}, schedule }] };
   return {
-    advance(ms: number) { realNow += ms; },
+    advance(ms: number) { realNow += ms; t.mock.timers.setTime(realNow); },
     async start() {
       let timer!: () => void, delay = -1;
       let deliver!: (message: AttentionMessage) => void;
