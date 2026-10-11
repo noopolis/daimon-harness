@@ -50,4 +50,3 @@ export async function* momentLines(fd: FileHandle): AsyncGenerator<Buffer> {
   }
   if (length) yield Buffer.concat(pending, length);
 }
-

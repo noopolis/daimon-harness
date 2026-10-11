@@ -883,6 +883,10 @@ bigint `(dev, ino, size, mtimeNs, ctimeNs, mode)`. Never drop ctime: restoring m
 must not hide an edit. Symlinks are recreated without following; special entries
 are skipped and counted; roots over 200,000 entries fail the capture. Dot-only
 root ids are encoded; arbitrary delivery ids are hashed only in filenames.
+Directory opens compare fstat dev/ino with the preceding lstat; Linux anchors
+through `/proc/self/fd`, and all platforms recheck directory identity around
+entry lookup, before file reads and after enumeration. A swapped directory
+fails that root. File opens use O_NOFOLLOW and compare fstat with entry lstat.
 
 `wakeMomentRecorder.ts` writes one bounded (4 MiB) fsynced JSONL row per attempt,
 with the active execution id, delivery metadata, successful roots and bounded
@@ -893,11 +897,19 @@ must never fail the wake. Retention prunes expired rows and recognized complete
 snapshots but always keeps the newest base per root, including removed roots,
 and explicitly protects the just-appended row and all its snapshots. Age comes
 from snapshot names; a synced zero-byte `.complete` marker records ownership so
-retention never parses manifests. Only the newest link-base manifest is read
+retention never parses manifests. Its regular-file, size-zero and single-link
+eligibility is checked before either base selection or retention protection;
+ineligible candidates are neither protected nor deleted. Only the newest link-base manifest is read
 per root. Unmarked pairs are preserved for inspection, never reused or pruned.
 Rows compaction checks the bounded first line, scans only when it is expired
-or every 64 wakes, and renames only when pruning occurred. Name enumeration
-still scales with snapshot count; historical file-content reads do not. Keep the data-only `wakeMoments`
+or every 64 wakes, and renames only when pruning occurred. Each root has a durable
+1 KiB `latest` cache naming its newest and oldest non-newest retained snapshots.
+Validate the pointer and newest candidate on use; enumerate only on missing/invalid
+cache or when the tracked oldest name can expire. Publish the cache (exclusive
+tmp, fsync, rename, directory fsync) before the completion marker so interrupted
+publication forces recovery rather than leaving a valid stale pointer. The
+private store has one snapshot publisher; expiry/recovery scans still scale with
+history, ordinary wakes do not enumerate it. Keep the data-only `wakeMoments`
 manifest capability and emitted digest in sync with these bounds.
 
 The shared manifest bound is 128 MiB of serialized UTF-8, enforced before any
@@ -915,8 +927,11 @@ deletion. A changed root aborts recording, never the turn; log if an error row
 cannot be written through the still-trusted store. Node has no openat: like spill
 publication, this retains a residual lstat-then-act race, not a race-free guarantee.
 
+Cleanup claims paths only after exclusive creation, including partials, metadata
+and temporary files. Name collision checks cover every artifact; directory and
+manifest publication reserve their destinations exclusively before rename.
 Snapshots publish a synced partial directory by rename, then a synced manifest
-by rename, then a synced `.complete` marker, then the row. A crash between them can leave partial/orphan captures,
+by rename, then the latest cache, a synced `.complete` marker, and the row. A crash between them can leave partial/orphan captures,
 or a row without an invoked turn; recording does not attest execution. Retention
 can leave old rows referencing pruned snapshots if interrupted; abandoned partials
 and temporary files remain for operator inspection. The snapshot is a point-in-time

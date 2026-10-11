@@ -64,17 +64,18 @@ test("writer and reader share the exact serialized manifest boundary before publ
   assert.equal((await readdir(f.base)).some((name) => name.includes("above")), false);
 });
 
-test("manifest and row reads stay constant as unexpired history grows", async (t) => {
+test("manifest reads, row reads, and directory entries processed stay constant as unexpired history grows", async (t) => {
   const f = await fixture(t), now = Date.parse("2026-10-10T00:00:00.000Z");
   const startedAt = new Date(now - 100).toISOString();
   await writeFile(path.join(f.source, "data"), "state");
   const first = await captureWakeSnapshot({ directory: f.directory, root: f.recording.snapshots[0]!, startedAt, executionId: "seed" });
   await appendWakeMomentRow(f.directory, { ...row(startedAt, "seed"), snapshots: [first.snapshot] });
   const measure = async (executionId: string) => {
-    const counts = { manifests: 0, rows: 0 };
-    await recordWakeMoment(f.agent, executionId, [], { now: () => now, probe: (operation, target) => {
+    const counts = { manifests: 0, rows: 0, entries: 0 };
+    await recordWakeMoment(f.agent, executionId, [], { now: () => now, probe: (operation, target, entries) => {
       if (operation === "read" && target?.endsWith(".manifest.json")) counts.manifests++;
       if (operation === "read" && target === f.rows) counts.rows++;
+      if (operation === "directoryEntries" && target?.startsWith(f.directory)) counts.entries += entries!;
     } });
     return counts;
   };
@@ -90,8 +91,8 @@ test("manifest and row reads stay constant as unexpired history grows", async (t
     await appendWakeMomentRow(f.directory, { ...row(stamp, `old-${i}`), deliveries: [{ acceptance_id: "x".repeat(2000), delivery_id: "id", kind: "message", occurred_at: stamp }] });
   }
   const large = await measure("large");
-  assert.deepEqual(small, { manifests: 2, rows: 2 }); // One manifest read plus its EOF check.
-  assert.deepEqual(large, small, "only the link base and bounded ledger head/tail are read");
+  assert.deepEqual(small, { manifests: 2, rows: 2, entries: 1 }); // Only the root namespace is enumerated.
+  assert.deepEqual(large, small, "neither capture nor retention processes snapshot history on ordinary wakes");
 });
 
 for (const phase of ["capture", "publish", "retention"] as const) test(`store ancestor swap before ${phase} cannot write or delete outside the pinned store`, async (t) => {

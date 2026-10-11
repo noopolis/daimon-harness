@@ -83,7 +83,7 @@ test("missing roots complete empty snapshots; entry-limit failures remove partia
   await mkdir(f.source); await mkdir(path.join(f.source, "directory"));
   await writeFile(path.join(f.source, "a"), "a"); await writeFile(path.join(f.source, "b"), "b");
   await assert.rejects(f.capture(2, { maxEntries: 2 }), /snapshot_entry_limit/);
-  assert.deepEqual((await readdir(f.base)).sort(), [missing.snapshot.snapshot, `${missing.snapshot.snapshot}.manifest.json`, `${missing.snapshot.snapshot}.complete`].sort());
+  assert.deepEqual((await readdir(f.base)).sort(), ["latest", missing.snapshot.snapshot, `${missing.snapshot.snapshot}.manifest.json`, `${missing.snapshot.snapshot}.complete`].sort());
 });
 
 test("replays never overwrite and filesystem-unsafe identifiers cannot escape the store", async (t) => {

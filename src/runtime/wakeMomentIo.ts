@@ -8,7 +8,7 @@ export class WakeMomentFault extends Error {
 }
 
 /** Internal fault-injection seam, never configuration or a public runtime export. */
-export type WakeMomentIoProbe = (operation: string, target?: string) => void | Promise<void>;
+export type WakeMomentIoProbe = (operation: string, target?: string, entries?: number) => void | Promise<void>;
 
 /** Every filesystem call checks cancellation before issuing I/O and after it settles. */
 export class WakeMomentIo {
@@ -26,6 +26,7 @@ export class WakeMomentIo {
           const result = await Reflect.apply(method, target, args);
           if (key === "open") return this.handle(result as FileHandle, String(args[0]));
           if (key === "opendir") return this.directory(result as Dir, String(args[0]));
+          if (key === "readdir") await this.probe?.("directoryEntries", String(args[0]), (result as unknown[]).length);
           return result;
         }, typeof args[key === "symlink" || key === "link" ? 1 : 0] === "string" ? String(args[key === "symlink" || key === "link" ? 1 : 0]) : undefined);
       }
@@ -89,6 +90,8 @@ export class WakeMomentIo {
           for (;;) {
             const entry = await io.call("readdir", () => dir.read(), target);
             if (!entry) break;
+            await io.probe?.("directoryEntries", target, 1);
+            io.check();
             yield entry;
           }
         } finally { await dir.close(); }

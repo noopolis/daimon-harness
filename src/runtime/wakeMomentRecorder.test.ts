@@ -57,7 +57,8 @@ test("failed roots are omitted, errors are bounded/redacted, and replay attempts
     { id: "bad", path: path.join(f.root, "secret-token-target") },
     { id: "missing", path: path.join(f.root, "missing") }, { id: "good", path: f.source }
   ] } };
-  for (let i = 0; i < 2; i++) await recordWakeMoment(agent, "same-execution", []);
+  // Both attempts are within retention regardless of filesystem/test-runner latency.
+  for (let i = 0; i < 2; i++) await recordWakeMoment(agent, "same-execution", [], { now: () => Date.parse("2026-10-09T12:00:00.000Z") + i });
   const rows: WakeMomentRow[] = (await readFile(f.rows, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(rows.length, 2);
   for (const r of rows) {

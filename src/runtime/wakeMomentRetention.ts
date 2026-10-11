@@ -3,11 +3,12 @@ import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { WAKE_MOMENTS, type WakeMomentRecording } from "../contracts/wakeMomentContract.js";
-import { openMomentDirectory, openMomentFile, pinMomentStore, removeMomentPath, syncMomentDirectory, writeMomentBytes, type MomentStore } from "./wakeMomentFs.js";
+import { cleanMomentPaths, openMomentDirectory, openMomentFile, pinMomentStore, removeMomentPath, syncMomentDirectory, writeMomentBytes, type MomentStore } from "./wakeMomentFs.js";
 import { WakeMomentIo } from "./wakeMomentIo.js";
 import { momentLines } from "./wakeMomentRows.js";
 import type { WakeMomentRow } from "./wakeMomentRecorder.js";
-import { completeSnapshotNames, snapshotRootName, snapshotTime, type WakeSnapshot } from "./wakeMomentSnapshot.js";
+import type { WakeSnapshot } from "./wakeMomentSnapshot.js";
+import { completeSnapshotNames, eligibleSnapshot, indexFromNames, latestSnapshotIndex, snapshotRootName, snapshotTime, writeSnapshotIndex } from "./wakeMomentHistory.js";
 
 const sweeps = new Map<string, number>();
 const key = (snapshot: WakeSnapshot): string => `${snapshot.id}/${snapshot.snapshot}`;
@@ -79,19 +80,26 @@ async function pruneSnapshots(directory: string, protectedSnapshots: Set<string>
       if (snapshotRootName(id) !== root.name) continue;
       const base = path.join(namespace, root.name);
       const fd = await openMomentDirectory(base, io); await fd.close();
-      const names = await completeSnapshotNames(base, io);
+      const state = await latestSnapshotIndex(base, io);
+      if (!state.names && (state.index!.oldest === null || snapshotTime(state.index!.oldest) >= cutoff)) continue;
+      const names = state.names ?? await completeSnapshotNames(base, io), removed = new Set<string>();
       for (const name of names.slice(1)) {
         if (protectedSnapshots.has(`${id}/${name}`) || snapshotTime(name) >= cutoff) continue;
         const target = path.join(base, name), manifest = `${target}.manifest.json`, marker = `${target}${WAKE_MOMENTS.completionSuffix}`;
         await store.verify(io, target);
-        if (!(await io.fs.lstat(target)).isDirectory()) continue;
-        const metadata = await io.fs.lstat(manifest), owned = await io.fs.lstat(marker);
-        if (!metadata.isFile() || metadata.nlink !== 1 || !owned.isFile() || owned.nlink !== 1 || owned.size !== 0) continue;
+        if (!await eligibleSnapshot(base, name, io)) continue;
         await store.verify(io, target);
         await removeMomentPath(target, store, io);
         await removeMomentPath(manifest, store, io);
         await removeMomentPath(marker, store, io);
         await syncMomentDirectory(base, io);
+        removed.add(name);
+      }
+      const index = indexFromNames(names.filter((name) => !removed.has(name)));
+      if (index) {
+        const cleanup = new Set<string>();
+        try { await writeSnapshotIndex(base, index, io, cleanup); }
+        finally { await cleanMomentPaths(cleanup, store, io); }
       }
     }
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }

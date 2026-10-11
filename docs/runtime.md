@@ -129,6 +129,7 @@ its digest participates in the image capability receipt. The store contains:
 <directory>/
   wake-moments.jsonl
   snapshots/<root id>/
+    latest
     <compact started_at>-<execution id>/
     <compact started_at>-<execution id>.manifest.json
     <compact started_at>-<execution id>.complete
@@ -150,7 +151,10 @@ Filesystem encoding preserves ordinary identifiers. The reserved root ids `.`
 and `..` use `%2E` and `%2E%2E` directory names. Execution ids outside
 `[A-Za-z0-9._-]{1,128}` use `sha256-<hex digest>` in filenames; rows retain the
 original id. Same-time/id collisions get a UUID suffix, never overwrite an
-attempt. The row's `snapshot` is the authoritative directory name.
+attempt. Collision checks include directories, partials, manifests, completion
+markers, and temporary files. Cleanup owns a path only after successful exclusive
+creation; publication reserves its destination exclusively too. The row's
+`snapshot` is the authoritative directory name.
 
 Each manifest maps relative paths to type, mode, size, source identity and
 symlink target. Large stat values are decimal strings. Unchanged regular files
@@ -166,10 +170,18 @@ either directory or manifest publication. Each JSONL line is capped at 4 MiB, in
 reads enforce the same bound. Errors contain bounded reason codes, never source
 paths, file contents or arbitrary exception text.
 
+Source directory opens compare descriptor `dev`/`ino` with the preceding lstat.
+Linux walks through `/proc/self/fd`; other platforms use pathnames with directory
+identity checks around entry lookup, before file reads, and after enumeration.
+Files open with `O_NOFOLLOW` and must match the entry's lstat identity. A detected
+directory replacement aborts that root with an error instead of publishing it.
+
 A root builds in `<snapshot>.partial`: copied files and directories are synced,
 the directory is renamed and synced, then its manifest is written by synced
 temporary file and rename. A snapshot is complete only with both directory and
-manifest and its zero-byte `.complete` ownership marker, synced last. The row follows in one append write plus fsync (and a directory fsync
+manifest and its regular, zero-byte, single-link `.complete` ownership marker,
+synced last. Ineligible markers are ignored before choosing a link base or the
+protected newest snapshot; their candidates are never pruned. The row follows in one append write plus fsync (and a directory fsync
 on first creation). Root failure removes the partial, omits that root from the
 row, records an error, and lets the turn run. Row or retention failure is logged
 and also lets the turn run. A torn final row is delimited before a later append;
@@ -205,7 +217,18 @@ After append, retention removes rows and complete snapshots older than
 it references**, independently of `keepMs` or clock movement. Snapshot ages come
 from their names. The completion marker proves writer ownership without reading
 historical manifests; only the newest link-base manifest per root is read during
-capture. Directory-name enumeration still scales with snapshot count. Ledger
+capture. Each root's `latest` is a bounded (1 KiB) durable cache naming the newest
+snapshot and the oldest retained non-newest snapshot. Reads validate its shape
+and the newest candidate's eligibility, enumerating history only if the cache is
+missing/invalid. A capture writes the cache via exclusive tmp, fsync, rename and
+directory fsync **before** creating the completion marker: an interrupted newer
+capture leaves an invalid pointer that forces recovery, never a stale valid
+pointer hiding a newer complete capture. Clock rollback preserves the newer base.
+Retention enumerates history only when that tracked oldest name could expire or
+the pointer needs recovery, then refreshes the oldest name. Ordinary wakes process
+no snapshot-history entries; recovery and expiry sweeps still scale with history.
+This assumes the runtime is the only snapshot publisher in its private store.
+Ledger
 compaction reads only its bounded first line on ordinary wakes, scanning fully
 when that row is expired or once every 64 wakes (to handle a foreign prefix or
 clock rollback); it renames a synced replacement only when rows were pruned.

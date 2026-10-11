@@ -115,12 +115,23 @@ export async function writeMomentBytes(fd: FileHandle, bytes: string | Buffer): 
   }
 }
 
-export async function writeMomentJson(file: string, bytes: string, io: WakeMomentIo, cleanup: Set<string>): Promise<void> {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  cleanup.add(temporary);
+export async function writeMomentJson(file: string, bytes: string, io: WakeMomentIo, cleanup: Set<string>, replace = false): Promise<void> {
+  let temporary: string;
+  do { temporary = `${file}.${randomUUID()}.tmp`; } while (await momentPathExists(temporary, io));
   const fd = await openMomentFile(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, io);
+  cleanup.add(temporary); // Exclusive creation, never the name alone, establishes cleanup ownership.
   try {
     await writeMomentBytes(fd, bytes); await fd.sync(); await fd.close();
+    let reservation: FileHandle;
+    try {
+      reservation = await openMomentFile(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, io);
+      cleanup.add(file);
+    } catch (error) {
+      if (!replace || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      // Only the disposable latest index may replace existing regular, single-link metadata.
+      reservation = await openMomentFile(file, constants.O_RDONLY, io);
+    }
+    await reservation.close();
     await io.fs.rename(temporary, file); cleanup.delete(temporary);
     await syncMomentDirectory(path.dirname(file), io);
   } finally { await fd.close(); }
