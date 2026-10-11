@@ -115,7 +115,7 @@ export async function writeMomentBytes(fd: FileHandle, bytes: string | Buffer): 
   }
 }
 
-export async function writeMomentJson(file: string, bytes: string, io: WakeMomentIo, cleanup: Set<string>, replace = false): Promise<void> {
+export async function writeMomentJson(file: string, bytes: string, io: WakeMomentIo, cleanup: Set<string>, verifyReplacement?: () => Promise<void>): Promise<void> {
   let temporary: string;
   do { temporary = `${file}.${randomUUID()}.tmp`; } while (await momentPathExists(temporary, io));
   const fd = await openMomentFile(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, io);
@@ -127,8 +127,8 @@ export async function writeMomentJson(file: string, bytes: string, io: WakeMomen
       reservation = await openMomentFile(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, io);
       cleanup.add(file);
     } catch (error) {
-      if (!replace || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      // Only the disposable latest index may replace existing regular, single-link metadata.
+      if (!verifyReplacement || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      await verifyReplacement(); // The caller must establish ownership before replacement.
       reservation = await openMomentFile(file, constants.O_RDONLY, io);
     }
     await reservation.close();

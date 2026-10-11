@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { WAKE_MOMENTS } from "../contracts/wakeMomentContract.js";
 import { readMomentJson, writeMomentJson } from "./wakeMomentFs.js";
-import { WakeMomentIo } from "./wakeMomentIo.js";
+import { WakeMomentFault, WakeMomentIo } from "./wakeMomentIo.js";
 
 export const SNAPSHOT_NAME = /^\d{8}T\d{9}Z-[A-Za-z0-9._-]{1,200}$/;
 export const snapshotRootName = (id: string): string => id === "." || id === ".." ? id.replaceAll(".", "%2E") : id;
@@ -23,10 +23,11 @@ export function snapshotTime(name: string): number {
 }
 
 /** Eligibility precedes BOTH base selection and retention protection, not only deletion. */
-export async function eligibleSnapshot(directory: string, name: string, io: WakeMomentIo): Promise<boolean> {
+export async function eligibleSnapshot(directory: string, name: string, io: WakeMomentIo, rollback?: ReadonlySet<string>): Promise<boolean> {
   if (!Number.isFinite(snapshotTime(name))) return false;
+  const target = path.join(directory, name);
+  if ([target, `${target}.manifest.json`, `${target}${WAKE_MOMENTS.completionSuffix}`].some((file) => rollback?.has(file))) return false;
   try {
-    const target = path.join(directory, name);
     const entry = await io.fs.lstat(target), manifest = await io.fs.lstat(`${target}.manifest.json`);
     const marker = await io.fs.lstat(`${target}${WAKE_MOMENTS.completionSuffix}`);
     return entry.isDirectory() && manifest.isFile() && manifest.nlink === 1
@@ -35,11 +36,11 @@ export async function eligibleSnapshot(directory: string, name: string, io: Wake
 }
 
 /** Only a missing/invalid index or an expired oldest name requires history enumeration. */
-export async function completeSnapshotNames(directory: string, io = new WakeMomentIo()): Promise<string[]> {
+export async function completeSnapshotNames(directory: string, io = new WakeMomentIo(), rollback?: ReadonlySet<string>): Promise<string[]> {
   const names: string[] = [];
   try {
     for await (const entry of await io.fs.opendir(directory)) {
-      if (entry.isDirectory() && await eligibleSnapshot(directory, entry.name, io)) names.push(entry.name);
+      if (entry.isDirectory() && await eligibleSnapshot(directory, entry.name, io, rollback)) names.push(entry.name);
     }
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   names.sort((a, b) => snapshotTime(b) - snapshotTime(a) || b.localeCompare(a));
@@ -55,15 +56,20 @@ export function indexFromNames(names: string[]): SnapshotIndex | undefined {
   return names[0] ? { version: INDEX_VERSION, snapshot: names[0], oldest: names.length > 1 ? names[names.length - 1]! : null } : undefined;
 }
 
-export async function latestSnapshotIndex(directory: string, io: WakeMomentIo): Promise<{ index?: SnapshotIndex; names?: string[] }> {
+function isSnapshotIndex(value: unknown): value is SnapshotIndex {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 3) return false;
+  const index = value as SnapshotIndex;
+  return index.version === INDEX_VERSION && typeof index.snapshot === "string" && Number.isFinite(snapshotTime(index.snapshot))
+    && (index.oldest === null || (typeof index.oldest === "string" && index.oldest !== index.snapshot
+      && Number.isFinite(snapshotTime(index.oldest)) && snapshotTime(index.oldest) <= snapshotTime(index.snapshot)));
+}
+
+export async function latestSnapshotIndex(directory: string, io: WakeMomentIo, rollback?: ReadonlySet<string>): Promise<{ index?: SnapshotIndex; names?: string[] }> {
   try {
-    const value = await readMomentJson(path.join(directory, "latest"), io, INDEX_BYTES) as SnapshotIndex;
-    if (value?.version === INDEX_VERSION && typeof value.snapshot === "string"
-      && (value.oldest === null || (typeof value.oldest === "string" && value.oldest !== value.snapshot
-        && Number.isFinite(snapshotTime(value.oldest)) && snapshotTime(value.oldest) <= snapshotTime(value.snapshot)))
-      && await eligibleSnapshot(directory, value.snapshot, io)) return { index: value };
+    const value = await readMomentJson(path.join(directory, "latest"), io, INDEX_BYTES);
+    if (isSnapshotIndex(value) && await eligibleSnapshot(directory, value.snapshot, io, rollback)) return { index: value };
   } catch { io.check(); /* The bounded index is a cache; recover from missing/damaged metadata. */ }
-  const names = await completeSnapshotNames(directory, io);
+  const names = await completeSnapshotNames(directory, io, rollback);
   return { index: indexFromNames(names), names };
 }
 
@@ -79,6 +85,11 @@ export function indexWithSnapshot(previous: SnapshotIndex | undefined, name: str
 
 export async function writeSnapshotIndex(directory: string, index: SnapshotIndex, io: WakeMomentIo, cleanup: Set<string>): Promise<void> {
   const target = path.join(directory, "latest");
-  await writeMomentJson(target, JSON.stringify(index), io, cleanup, true);
+  await writeMomentJson(target, JSON.stringify(index), io, cleanup, async () => {
+    let owned = false;
+    try { owned = isSnapshotIndex(await readMomentJson(target, io, INDEX_BYTES)); }
+    catch { io.check(); }
+    if (!owned) throw new WakeMomentFault("invalid_latest_index");
+  });
   cleanup.delete(target);
 }

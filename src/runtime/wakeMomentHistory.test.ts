@@ -52,13 +52,11 @@ for (const marker of ["nonzero", "hard-linked"]) for (const pointer of ["missing
   assert.equal((await lstat(output)).ino, (await lstat(path.join(f.base, valid, "data"))).ino);
 });
 
-for (const damage of ["missing", "malformed", "dangling", "oversized"]) test(`${damage} latest pointer falls back to enumeration and is repaired`, async (t) => {
+for (const damage of ["missing", "dangling"]) test(`${damage} latest pointer falls back to enumeration and is repaired`, async (t) => {
   const f = await fixture(t);
   await f.capture(now - 500, "seed");
   const target = path.join(f.base, "latest");
   if (damage === "missing") await rm(target);
-  else if (damage === "malformed") await writeFile(target, "{");
-  else if (damage === "oversized") await writeFile(target, "x".repeat(1025));
   else {
     const index = JSON.parse(await readFile(target, "utf8"));
     await writeFile(target, JSON.stringify({ ...index, snapshot: snapshotName(new Date(now).toISOString(), "absent") }));
@@ -71,6 +69,31 @@ for (const damage of ["missing", "malformed", "dangling", "oversized"]) test(`${
   const [row] = await f.rows(); assert.equal(row!.error, undefined); assert.equal(row!.snapshots[0]!.linked, 1);
   const index = JSON.parse(await readFile(target, "utf8"));
   assert.equal(index.snapshot, row!.snapshots[0]!.snapshot);
+});
+
+for (const damage of ["foreign", "malformed", "oversized", "extra-key", "wrong-version", "invalid-name", "missing-oldest", "invalid-oldest"]) test(`${damage} latest file survives byte-identical while capture uses enumeration`, async (t) => {
+  const f = await fixture(t);
+  const seed = (await f.capture(now - 500, "seed")).snapshot.snapshot;
+  const target = path.join(f.base, "latest"), index = JSON.parse(await readFile(target, "utf8"));
+  const bytes = Buffer.from(damage === "foreign" ? "foreign bytes\0\xff" : damage === "malformed" ? "{" : damage === "oversized" ? "x".repeat(1025)
+    : JSON.stringify(damage === "extra-key" ? { ...index, foreign: true } : damage === "wrong-version" ? { ...index, version: "foreign" }
+      : damage === "invalid-name" ? { ...index, snapshot: "../foreign" } : damage === "missing-oldest" ? { version: index.version, snapshot: seed }
+      : { ...index, oldest: "invalid" }));
+  await writeFile(target, bytes);
+  const before = await lstat(target), logs: string[] = [];
+  t.mock.method(console, "error", (message: string) => logs.push(message));
+  let enumerated = false;
+  await recordWakeMoment(f.agent, "foreign-index", [], { now: () => now, probe: (operation, directory) => {
+    if (operation === "directoryEntries" && directory === f.base) enumerated = true;
+  } });
+  assert.deepEqual(await readFile(target), bytes); assert.equal((await lstat(target)).ino, before.ino);
+  assert.equal(enumerated, true);
+  const [row] = await f.rows(); assert.match(row!.error!, /state: invalid_latest_index/);
+  assert.equal(row!.snapshots.length, 1); assert.equal(row!.snapshots[0]!.linked, 1);
+  const captured = path.join(f.base, row!.snapshots[0]!.snapshot);
+  assert.equal((await lstat(`${captured}.complete`)).size, 0);
+  assert.equal((await lstat(path.join(captured, "data"))).ino, (await lstat(path.join(f.base, seed, "data"))).ino);
+  assert.equal(await readFile(path.join(captured, "data"), "utf8"), "original");
 });
 
 test("latest pointer is bounded, durable before completion, and usable by a fresh reader without history enumeration", async (t) => {

@@ -72,7 +72,7 @@ async function capture(input: CaptureInput, io: WakeMomentIo, cleanup: Set<strin
   let name = requestedName;
   while (await collides(name)) name = `${requestedName}-${randomUUID()}`;
   const partial = path.join(base, `${name}.partial`), destination = path.join(base, name);
-  const { index } = await latestSnapshotIndex(base, io), previousName = index?.snapshot;
+  const { index } = await latestSnapshotIndex(base, io, cleanup), previousName = index?.snapshot;
   let previous = previousName ? await readSnapshotManifest(base, previousName, input.root.id, io, input.maxManifestBytes) : undefined;
   if (previous?.sourcePath !== input.root.path) previous = undefined;
   const manifest: WakeSnapshotManifest = { version: WAKE_MOMENTS.version, id: input.root.id, snapshot: name, started_at: input.startedAt, sourcePath: input.root.path, entries: Object.create(null) as Record<string, SnapshotEntry> };
@@ -98,7 +98,11 @@ async function capture(input: CaptureInput, io: WakeMomentIo, cleanup: Set<strin
     await syncMomentDirectory(base, io);
     const manifestPath = path.join(base, `${name}.manifest.json`);
     await writeMomentJson(manifestPath, bytes, io, cleanup);
-    await writeSnapshotIndex(base, indexWithSnapshot(index, name), io, cleanup);
+    try { await writeSnapshotIndex(base, indexWithSnapshot(index, name), io, cleanup); }
+    catch (error) {
+      if (!(error instanceof WakeMomentFault) || error.reason !== "invalid_latest_index") throw error;
+      note = [note, error.reason].filter(Boolean).join("; ");
+    }
     const markerPath = path.join(base, `${name}${WAKE_MOMENTS.completionSuffix}`);
     const marker = await openMomentFile(markerPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, io);
     cleanup.add(markerPath);

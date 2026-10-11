@@ -59,13 +59,14 @@ export async function recordWakeMoment(agent: OrganizationRuntimeAgentConfig, ex
       finalizer.verifyWrite = (target) => store!.verify(finalizer, target);
       if (errors.length) row.error = errors.join("; ").slice(0, 2048);
       // A stuck best-effort cleanup must not prevent the error row from being attempted.
-      await Promise.all([
-        cleanMomentPaths(cleanup, store, finalizer).catch((error) => logFailure(wakeMomentFailure(error))),
-        (async () => {
-          await appendWakeMomentRow(recording.directory, row!, finalizer);
-          await pruneWakeMoments(recording, agent.id, now(), row, finalizer, store);
-        })()
+      const [cleaned] = await Promise.all([
+        cleanMomentPaths(cleanup, store, finalizer).then(() => true, (error) => { logFailure(wakeMomentFailure(error)); return false; }),
+        appendWakeMomentRow(recording.directory, row, finalizer)
       ]);
+      if (cleaned) {
+        finalizer.check();
+        await pruneWakeMoments(recording, agent.id, now(), row, finalizer, store);
+      }
     });
   } catch (error) { logFailure(wakeMomentFailure(error)); }
   finally { if (store) void store.close().catch(() => undefined); }

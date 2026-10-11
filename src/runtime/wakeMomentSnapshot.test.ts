@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { captureWakeSnapshot, readSnapshotManifest, snapshotRootName } from "./wakeMomentSnapshot.js";
+import { WakeMomentIo } from "./wakeMomentIo.js";
 
 async function fixture(t: test.TestContext) {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "wake-snapshot-"));
@@ -108,4 +109,26 @@ test("special filesystem entries are skipped and counted without opening them", 
   const { snapshot } = await f.capture(1);
   assert.equal(snapshot.skipped, 1); assert.equal(snapshot.files, 0);
   assert.deepEqual(await readdir(path.join(f.base, snapshot.snapshot)), []);
+});
+
+for (const pointer of ["present", "missing"]) test(`rollback-owned snapshot is excluded from the ${pointer} pointer's base selection`, async (t) => {
+  const f = await fixture(t);
+  await writeFile(path.join(f.source, "data"), "original");
+  const prior = (await f.capture(1)).snapshot.snapshot;
+  await writeFile(path.join(f.source, "data"), "changed");
+  const cleanup = new Set<string>();
+  let failedMarker: string | undefined;
+  const io = new WakeMomentIo((operation, target) => {
+    if (!failedMarker && operation === "sync" && target?.endsWith(".complete")) {
+      failedMarker = target; throw Object.assign(new Error("injected"), { code: "EIO" });
+    }
+  });
+  await assert.rejects(f.capture(2, { io, cleanup }), { code: "EIO" });
+  assert.ok(failedMarker); assert.ok(cleanup.has(failedMarker));
+  assert.equal((await lstat(failedMarker)).size, 0, "failed capture looks complete until rollback");
+  if (pointer === "missing") await rm(path.join(f.base, "latest"));
+  const result = await f.capture(3, { io, cleanup });
+  assert.equal(result.snapshot.copied, 1); assert.equal(result.snapshot.linked, 0, "the failed capture cannot supply hard links");
+  assert.equal(await readFile(path.join(f.base, prior, "data"), "utf8"), "original");
+  assert.equal(await readFile(path.join(f.base, result.snapshot.snapshot, "data"), "utf8"), "changed");
 });

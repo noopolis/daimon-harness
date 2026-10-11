@@ -6,7 +6,7 @@ import test from "node:test";
 import { WAKE_MOMENTS } from "../contracts/wakeMomentContract.js";
 import type { OrganizationRuntimeAgentConfig } from "./organizationRuntime.js";
 import { appendWakeMomentRow, pruneWakeMoments, recordWakeMoment, type WakeMomentRow } from "./wakeMomentRecorder.js";
-import { captureWakeSnapshot } from "./wakeMomentSnapshot.js";
+import { captureWakeSnapshot, completeSnapshotNames, snapshotName } from "./wakeMomentSnapshot.js";
 
 async function fixture(t: test.TestContext) {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "wake-recorder-"));
@@ -121,4 +121,48 @@ test("retention keeps the last completed attempt when capture timestamps tie", a
   const base = path.join(f.directory, "snapshots", "state");
   await assert.rejects(lstat(path.join(base, first.snapshot.snapshot)), /ENOENT/);
   assert.equal(await readFile(path.join(base, second.snapshot.snapshot, "data"), "utf8"), "second");
+});
+
+for (const outcome of ["success", "failure", "timeout"]) test(`marker-sync EIO with delayed cleanup (${outcome}) preserves the previous complete snapshot`, { timeout: 5000 }, async (t) => {
+  const f = await fixture(t), now = Date.parse("2026-10-10T00:00:00.000Z"), base = path.join(f.directory, "snapshots", "state");
+  await writeFile(path.join(f.source, "data"), "last good state");
+  const capture = (age: number, executionId: string) => captureWakeSnapshot({ directory: f.directory, root: f.recording.snapshots[0]!, startedAt: new Date(now - age).toISOString(), executionId });
+  const older = (await capture(4000, "older")).snapshot.snapshot, prior = (await capture(2000, "prior")).snapshot.snapshot;
+  const failed = path.join(base, snapshotName(new Date(now).toISOString(), "failed"));
+  let release!: () => void, cleanupStarted!: () => void, rowSynced!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const cleaning = new Promise<void>((resolve) => { cleanupStarted = resolve; });
+  const appended = new Promise<void>((resolve) => { rowSynced = resolve; });
+  let injected = false, retentionCalls = 0;
+  const logs: string[] = []; t.mock.method(console, "error", (message: string) => logs.push(message));
+  const work = recordWakeMoment(f.agent, "failed", [], { now: () => now, probe: async (operation, target) => {
+    if (operation === "sync" && target === `${failed}.complete`) { injected = true; throw Object.assign(new Error("injected"), { code: "EIO" }); }
+    if (operation === "sync" && target === f.rows) rowSynced();
+    if (operation === "opendir" && target === path.dirname(base)) retentionCalls++;
+    if (operation === "unlink" && target === path.join(failed, "data")) {
+      cleanupStarted(); await pending;
+      if (outcome === "failure") throw Object.assign(new Error("cleanup failed"), { code: "EIO" });
+    }
+  } });
+  try {
+    await Promise.all([cleaning, appended]);
+    // Keep cleanup pending long enough for the row's independent finalization to finish.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const recorded: WakeMomentRow = JSON.parse(await readFile(f.rows, "utf8"));
+    assert.equal(injected, true); assert.match(recorded.error!, /state: EIO/); assert.deepEqual(recorded.snapshots, []);
+    assert.equal(retentionCalls, 0, "retention cannot start while cleanup is pending");
+    assert.equal(await readFile(path.join(base, prior, "data"), "utf8"), "last good state");
+    if (outcome === "timeout") await work;
+  } finally { release(); await work; }
+  await new Promise((resolve) => setImmediate(resolve)); // Let abandoned cleanup observe its cancellation fence.
+  assert.equal(await readFile(path.join(base, prior, "data"), "utf8"), "last good state");
+  const complete = await completeSnapshotNames(base);
+  assert.ok(complete.includes(prior)); assert.ok(complete.length >= 1);
+  assert.equal(retentionCalls, outcome === "success" ? 1 : 0);
+  if (outcome === "success") {
+    assert.deepEqual(complete, [prior]); await assert.rejects(lstat(path.join(base, older)), /ENOENT/);
+  } else {
+    await lstat(path.join(base, older));
+    assert.ok(logs.some((message) => message.includes(outcome === "failure" ? "EIO" : "capture_deadline_exceeded")));
+  }
 });
