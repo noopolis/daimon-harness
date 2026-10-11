@@ -25,7 +25,7 @@ import { DAIMON_WAKE_ID_ENV } from "./cliEnvironment.js";
 import { createPiWorldTools, piWorldToolNames, type PiWorldBinding } from "./worldTools.js";
 import type { PiWorldToolContextRef } from "./worldNudge.js";
 import { ensureRuntimeHome, ensureRuntimeHomeDirectory } from "../runtime/runtimeHomeLayout.js";
-import { readTaskClock, taskClockChildEnvironment } from "../runtime/taskClock.js";
+import { readTaskClock, taskClockChildEnvironment, taskClockProcessEnvironment } from "../runtime/taskClock.js";
 import { createClockedMemoryRuntime, memoryClockOptions } from "./memoryClock.js";
 import { verifyTaskClockProcess, type TaskClockProcessProbe } from "./taskClockProcess.js";
 import {
@@ -284,7 +284,7 @@ function createProtectedBashTool(
     spawnHook: (context) => ({
       ...context,
       env: {
-        ...Object.fromEntries(Object.entries(context.env).filter(([name]) => !protectedNames.includes(name) && !(clockEnvironment.NOOPOLIS_TASK_CLOCK !== undefined && name === "LD_PRELOAD"))),
+        ...Object.fromEntries(Object.entries(taskClockProcessEnvironment(context.env, clockEnvironment)).filter(([name]) => !protectedNames.includes(name))),
         HOME: runtimeHomePath,
         XDG_CONFIG_HOME: `${runtimeHomePath}/.config`,
         XDG_DATA_HOME: `${runtimeHomePath}/.local/share`,

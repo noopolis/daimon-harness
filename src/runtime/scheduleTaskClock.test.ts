@@ -8,7 +8,7 @@ import { createOrganizationRuntimeHostForTest } from "./organizationRuntimeHost.
 import { createOrganizationRuntimeControlHostWithCoreForTest } from "./organizationRuntimeControl.js";
 
 const realAnchor = Date.parse("2026-10-11T12:00:00Z");
-async function fixture(t: TestContext, origin: string, timezone: string, cron: string, clocked = true) {
+async function fixture(t: TestContext, origin: string, timezone: string, cron: string, clocked = true, intervalMs?: number) {
   const previous = process.env;
   process.env = { ...previous, CLOCK_TEST_TOKEN: "test" };
   if (clocked) process.env.NOOPOLIS_TASK_CLOCK = JSON.stringify({ version: "noopolis.task-clock.v1", origin, anchorEpochMs: realAnchor });
@@ -17,7 +17,8 @@ async function fixture(t: TestContext, origin: string, timezone: string, cron: s
   let realNow = realAnchor;
   const controls: ReturnType<typeof createOrganizationRuntimeControlHostWithCoreForTest>[] = [];
   t.after(async () => { for (const control of controls) await control.stop(); process.env = previous; await rm(root, { recursive: true, force: true }); });
-  const config = { version: "noopolis.daimon.organization-runtime.v2", host: { bindHost: "127.0.0.1", port: 4318, controlTokenEnv: "CLOCK_TEST_TOKEN" }, agents: [{ id: "a", name: "A", instructions: "test", workspacePath: path.join(root, "workspace"), runtimeHomePath: path.join(root, "home"), engine: { kind: "codex" }, attention: {}, schedule: { kind: "cron", cron, timezone, prompt: "work" } }] };
+  const schedule = intervalMs === undefined ? { kind: "cron", cron, timezone, prompt: "work" } : { kind: "every", interval_ms: intervalMs, prompt: "work" };
+  const config = { version: "noopolis.daimon.organization-runtime.v2", host: { bindHost: "127.0.0.1", port: 4318, controlTokenEnv: "CLOCK_TEST_TOKEN" }, agents: [{ id: "a", name: "A", instructions: "test", workspacePath: path.join(root, "workspace"), runtimeHomePath: path.join(root, "home"), engine: { kind: "codex" }, attention: {}, schedule }] };
   return {
     advance(ms: number) { realNow += ms; },
     async start() {
@@ -94,3 +95,26 @@ test("unset clock still selects the real calendar occurrence", async (t) => {
   assert.equal(host.delay(), 21 * 3600000);
   assert.equal(await host.nextDue(), Date.parse("2026-10-12T09:00:00Z"));
 });
+
+for (const kind of ["cron", "every"] as const) {
+  test(`1960 task origin restarts ${kind} schedules with negative due and fire timestamps`, { timeout: 5000 }, async (t) => {
+    const rig = await fixture(t, "1960-01-01T08:59:00Z", "UTC", "* * * * *", true, kind === "every" ? 60_000 : undefined);
+    const first = await rig.start();
+    assert.equal(first.delay(), 60_000);
+    assert.equal(await first.nextDue(), Date.parse("1960-01-01T09:00:00Z"));
+    await first.control.stop();
+    rig.advance(30_000);
+    const second = await rig.start();
+    assert.equal(second.delay(), 30_000);
+    assert.equal(await second.nextDue(), Date.parse("1960-01-01T09:00:00Z"));
+    rig.advance(30_000); second.fire();
+    const occurrence = await second.delivered;
+    assert.equal(occurrence.occurred_at, "1960-01-01T09:00:00.000Z");
+    assert.match(occurrence.delivery_id, /:1960-01-01T09:00/u);
+    assert.equal((await second.control.wakeReceipt("test", occurrence.acceptance_id))!.state, "completed");
+    await second.control.stop();
+    const third = await rig.start();
+    assert.equal(third.delay(), 60_000);
+    assert.equal(await third.nextDue(), Date.parse("1960-01-01T09:01:00Z"));
+  });
+}

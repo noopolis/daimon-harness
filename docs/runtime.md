@@ -59,14 +59,18 @@ standalone Pi harness. It adds no public config field or callback and no
 compiler dependency. Keep the process environment fixed for the runtime's
 lifetime; a different clock requires restarting it.
 
-Daimon forwards the original JSON bytes to engine CLI and MCP stdio children,
-Pi bash tools and Moltnet CLI children. It also derives `MNEME_CLOCK_ORIGIN`
-and `MNEME_CLOCK_ANCHOR_MS` from that same origin and anchor. It never resets
-the anchor when a process starts. Any conflicting server-declared value of
-the derived variables refuses startup, including declarations for remote MCP
-servers; matching values are allowed. This prevents silent clock divergence.
-Remote MCP services must be launched with the same contract by their owner;
-Daimon cannot set another service's process environment.
+Daimon's process stays on real time and computes task time from this contract.
+Daimon's child-environment builders assign one offset owner: the libfaketime process clock. Engine
+CLI, MCP stdio, Pi bash and Moltnet children receive no `NOOPOLIS_TASK_CLOCK` or
+`MNEME_CLOCK_*` variables. A Mneme MCP server therefore uses its already shifted
+`Date.now()` without applying another offset. Inherited clock and loader controls
+are removed before the derived process environment is applied.
+
+When clocked, any declared child/server environment setting `LD_PRELOAD`,
+`DYLD_*`, `FAKETIME*`, `NOOPOLIS_TASK_CLOCK` or `MNEME_CLOCK_*` refuses startup,
+even if empty or identical to a derived value. This includes remote MCP declarations
+and the explicit test runtime's MCP environment allowlist. Remote MCP owners must
+arrange a single task-clock owner themselves; Daimon cannot change a remote process.
 
 In-process memory requires Mneme's root `createOffsetClock` export and
 `createMemoryRuntime({ clock })` support. Daimon detects that export in one
@@ -81,31 +85,42 @@ propagation. Task-clock runs using that broker refuse startup explicitly;
 they require a separate native broker contract/artifact update. Direct engine
 CLI children receive the clock through the normal CLI environment.
 
-The caller's image must install libfaketime and supply `LD_PRELOAD` in Daimon's
-own environment. For clocked children only, Daimon forwards that value when every
-library basename matches `libfaketime*.so*`; unrelated or mixed loader lists are
-not forwarded. It derives `FAKETIME` as the signed integer
-`round((originMs - anchorEpochMs) / 1000)` and sets
-`FAKETIME_DONT_FAKE_MONOTONIC=1`. For example, `FAKETIME=-3600` means one hour
-behind real time, consistently across processes started at different times.
-[Libfaketime's relative format](https://github.com/wolfcw/libfaketime#readme)
-uses seconds by default; it documents `m`, `h`, `d`, `y` multipliers, not an `s`
-suffix. A conflicting server declaration of either `FAKETIME` variable or
-`LD_PRELOAD` is a startup error too; a server cannot supply its own preload.
+The caller's **Linux** image must install libfaketime and supply `LD_PRELOAD` in
+Daimon's environment without shifting Daimon's own clock. For clocked children,
+Daimon forwards that value only when every library basename matches
+`libfaketime*.so*`; unrelated or mixed loader lists are not forwarded. It derives
+`FAKETIME` as signed seconds `(originMs - anchorEpochMs) / 1000`, preserving all
+milliseconds with at most three decimal places, and sets
+`FAKETIME_DONT_FAKE_MONOTONIC=1`. The shared vector (origin
+`2001-01-01T00:00:00.000Z`, anchor `1821692800250`) yields `-843385600.250`.
+[Libfaketime documents fractional relative offsets](https://github.com/wolfcw/libfaketime#readme)
+(since v0.8); seconds are the default unit, without an `s` suffix. Decimal parsing
+is locale-sensitive in libfaketime, so clocked child environments pin `LC_ALL=C`
+to keep the decimal point unambiguous.
 
-Before its first session/wake, each agent runs one bounded `date -u +%s` probe
-(argv, no shell) using the same CLI child-environment builder. Missing libfaketime
-preload, a failed/missing `date`, or an observation more than five seconds from
-task now refuses startup. Later wakes and dream sessions do not repeat the probe.
-Daimon's own wall clock must remain real: the caller supplies the library, not a
-shifted parent clock. Daimon never patches global `Date`. The probe verifies the
-local process mechanism; remotely hosted MCP services still need their owner's
-clock support. Unset clocks preserve existing environments.
+Before the first session/wake, each agent refuses non-Linux platforms and runs two
+bounded `date -u +%s` probes (argv, no shell) through the CLI environment builder:
+a sentinel `FAKETIME=-31536000` must first prove interposition within ±5 seconds,
+then the derived real offset must observe task time within ±5 seconds. A near-zero
+offset cannot pass on an unshifted process clock. Missing preload, failed/missing
+`date`, loader diagnostics or either mismatch refuse startup. Later wakes and
+dream sessions do not repeat the probes. Daimon never patches global `Date`;
+real waits and accounting remain on the host clock. This verifies the local
+mechanism, not the behavior of every engine or remotely hosted MCP service.
+Unset clocks preserve existing environments.
+
+Universal child coverage remains incomplete: the installed Pi SDK's built-in
+`grep` and `find` tools spawn helpers without an environment override, outside
+Daimon's bash hook. Those helpers still inherit the host environment. The SDK
+needs a child-environment hook or a separate tool adapter before these paths can
+satisfy the single-owner process-clock contract; the startup probe does not
+establish their behavior.
 
 Schedules select cron/timezone occurrences in task time and persist those task
 instants, including occurrence IDs. Real timers wait `due - taskNow`, since the
 clock advances at the real rate. Restart uses that persisted task-calendar state
-and the original shared anchor. Use a separate acceptance store for a different
+and the original shared anchor. Restoration accepts valid epoch milliseconds in
+years 0000–9999, including negative timestamps for pre-1970 tasks. Use a separate acceptance store for a different
 clock contract; existing state is not translated between calendars.
 
 | Time surface | Clock / treatment |

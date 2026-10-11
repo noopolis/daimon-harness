@@ -14,24 +14,35 @@ function environment(t: TestContext) {
   t.after(() => { process.env = previous; });
 }
 
-test("startup probe uses date argv without a shell and the exact CLI child environment", async (t) => {
+function linux(t: TestContext) {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { value: "linux" });
+  t.after(() => { Object.defineProperty(process, "platform", descriptor); });
+}
+const shifted: TaskClockProcessProbe = async (_command, _args, env) => `${Math.floor((Date.now() + Number(env.FAKETIME) * 1000) / 1000)}\n`;
+
+test("startup probe uses sentinel then real offset with date argv and the CLI child environment", async (t) => {
   environment(t);
+  linux(t);
   let calls = 0;
   await verifyTaskClockProcess("/runtime", undefined, async (command, args, env) => {
     calls++;
     assert.equal(command, "date"); assert.deepEqual(args, ["-u", "+%s"]);
-    assert.deepEqual(env, cliChildEnvironment([], "/runtime"));
-    return `${Math.floor(readTaskClock()!.now() / 1000)}\n`;
+    assert.deepEqual(env, { ...cliChildEnvironment([], "/runtime"), ...(calls === 1 ? { FAKETIME: "-31536000" } : {}) });
+    return shifted(command, args, env);
   });
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   delete process.env.NOOPOLIS_TASK_CLOCK;
   await verifyTaskClockProcess("/runtime", undefined, async () => { throw new Error("unset must not probe"); });
 });
 
 test("startup refuses mismatched, malformed, missing-date and missing-preload observations", async (t) => {
   environment(t);
+  linux(t);
   for (const output of [String(Math.floor(Date.now() / 1000)), "", "not-a-time", "NaN", `${Math.floor(readTaskClock()!.now() / 1000) + 6}`]) {
-    await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async () => output), /did not observe task time.*refusing clocked execution/u);
+    let calls = 0;
+    await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async (command, args, env) => ++calls === 1 ? shifted(command, args, env) : output), /did not observe task time.*refusing clocked execution/u);
+    assert.equal(calls, 2, "the real-offset check must run after sentinel interposition succeeds");
   }
   await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async () => { throw Object.assign(new Error("date"), { code: "ENOENT" }); }), /date\/libfaketime missing or unusable/u);
   for (const value of [undefined, "/tmp/libunrelated.so", "/caller/libfaketime.so.1:/tmp/libunrelated.so"]) {
@@ -42,14 +53,41 @@ test("startup refuses mismatched, malformed, missing-date and missing-preload ob
   }
 });
 
-test("the real date probe refuses an unavailable preload instead of trusting variables", async (t) => {
+test("the real date probe refuses an unavailable preload even for a near-zero offset", async (t) => {
   environment(t);
+  process.env.NOOPOLIS_TASK_CLOCK = JSON.stringify({ version: "noopolis.task-clock.v1", origin: new Date(Date.now() + 3000).toISOString(), anchorEpochMs: Date.now() });
   // The path does not exist: Linux ignores it with a loader warning; macOS ignores LD_PRELOAD.
   await assert.rejects(verifyTaskClockProcess(os.tmpdir()), /process clock startup probe.*refusing clocked execution/u);
 });
 
+test("non-Linux platforms refuse clocked execution before invoking a successful probe", async (t) => {
+  environment(t);
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  t.after(() => { Object.defineProperty(process, "platform", descriptor); });
+  for (const platform of ["darwin", "win32", "freebsd"]) {
+    Object.defineProperty(process, "platform", { value: platform });
+    let calls = 0;
+    await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async (...args) => { calls++; return shifted(...args); }), /requires Linux.*refusing clocked execution/u);
+    assert.equal(calls, 0);
+  }
+});
+
+test("near-zero offsets still require sentinel interposition, then verify the real offset", async (t) => {
+  environment(t); linux(t);
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  for (const offset of [0, 1, 3000, -3000]) {
+    process.env.NOOPOLIS_TASK_CLOCK = JSON.stringify({ version: "noopolis.task-clock.v1", origin: new Date(now + offset).toISOString(), anchorEpochMs: now });
+    let calls = 0;
+    await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async () => { calls++; return String(Math.floor(now / 1000)); }), /did not observe sentinel offset/u);
+    assert.equal(calls, 1);
+    await verifyTaskClockProcess("/runtime", undefined, shifted);
+  }
+});
+
 test("a loader warning refuses startup even when date exits zero with matching output", async (t) => {
   environment(t);
+  linux(t);
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-date-diagnostic-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const command = path.join(root, "date");
@@ -62,6 +100,7 @@ test("a loader warning refuses startup even when date exits zero with matching o
 for (const mode of ["missing-preload", "mismatch", "missing-date"] as const) {
   test(`Pi startup refuses ${mode} before home/session creation`, async (t) => {
     environment(t);
+    linux(t);
     if (mode === "missing-preload") delete process.env.LD_PRELOAD;
     const root = await mkdtemp(path.join(os.tmpdir(), "daimon-probe-"));
     t.after(() => rm(root, { recursive: true, force: true }));

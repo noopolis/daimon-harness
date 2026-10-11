@@ -32,8 +32,9 @@ const TOOLS = {
     description: "Reports only the task clock environment",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     call: () => ({ structuredContent: Object.fromEntries([
-      "NOOPOLIS_TASK_CLOCK", "MNEME_CLOCK_ORIGIN", "MNEME_CLOCK_ANCHOR_MS",
-      "FAKETIME", "FAKETIME_DONT_FAKE_MONOTONIC", "LD_PRELOAD"
+      "NOOPOLIS_TASK_CLOCK", "MNEME_CLOCK_ORIGIN", "MNEME_CLOCK_ANCHOR_MS", "MNEME_CLOCK_FUTURE",
+      "FAKETIME_SKIP_CMDS", "FAKETIME_ONLY_CMDS", "DYLD_INSERT_LIBRARIES",
+      "FAKETIME", "FAKETIME_DONT_FAKE_MONOTONIC", "LD_PRELOAD", "LC_ALL"
     ].filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]])) })
   },
   /** Content only, and the original fixture's behaviour, unchanged. */

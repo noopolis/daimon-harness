@@ -273,12 +273,12 @@ async function restore(
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("schedule state is invalid");
     const entry = raw as Record<string, unknown>; const keys = Object.keys(entry).sort().join();
     if (!["fire_at_ms,next_due_ms", "fire_at_ms,latest_pending,next_due_ms", "latest_pending,next_due_ms", "next_due_ms"].includes(keys)) throw new Error("schedule state is invalid");
-    if (!Number.isSafeInteger(entry.next_due_ms) || (entry.next_due_ms as number) < 0) throw new Error("schedule state is invalid");
+    if (!validTaskInstant(entry.next_due_ms)) throw new Error("schedule state is invalid");
     const nextDue = entry.next_due_ms as number;
     const fireAt = entry.fire_at_ms;
     if (fireAt !== undefined) {
       const maximumFireAt = nextDue + jitterOffsetMs(allowed.get(key)!.schedule, () => 0.999_999_999);
-      if (!Number.isSafeInteger(fireAt) || (fireAt as number) < nextDue || (fireAt as number) > maximumFireAt) throw new Error("schedule state is invalid");
+      if (!validTaskInstant(fireAt) || fireAt < nextDue || fireAt > maximumFireAt) throw new Error("schedule state is invalid");
     }
     const pending = entry.latest_pending === undefined ? undefined : parseOccurrence(entry.latest_pending);
     if (pending !== undefined) assertRestoredOccurrence(key, allowed.get(key)!, pending, nextDue);
@@ -305,8 +305,13 @@ function parseOccurrence(value: unknown): ScheduledOccurrence {
   const item = value as Record<string, unknown>;
   if (Object.keys(item).sort().join() !== "agentId,deliveryId,occurredAt,prompt" || Object.values(item).some((entry) => typeof entry !== "string" || Buffer.byteLength(entry, "utf8") > 16_384)) throw new Error("schedule state is invalid");
   const occurredAt = item.occurredAt as string;
-  if (Number.isNaN(Date.parse(occurredAt)) || new Date(occurredAt).toISOString() !== occurredAt || !/^schedule:[a-f0-9]{64}:/u.test(item.deliveryId as string)) throw new Error("schedule state is invalid");
+  if (!validTaskInstant(Date.parse(occurredAt)) || new Date(occurredAt).toISOString() !== occurredAt || !/^schedule:[a-f0-9]{64}:/u.test(item.deliveryId as string)) throw new Error("schedule state is invalid");
   return item as unknown as ScheduledOccurrence;
+}
+function validTaskInstant(value: unknown): value is number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) return false;
+  const year = new Date(value).getUTCFullYear();
+  return year >= 0 && year <= 9999;
 }
 async function persist(file: string, value: State, directory: Awaited<ReturnType<typeof open>>, observe?: ScheduleControllerOptions["onPersistStageForTest"]): Promise<void> {
   const bytes = Buffer.from(JSON.stringify(value), "utf8");

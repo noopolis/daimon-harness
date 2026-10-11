@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
+import { verifyTaskClockProcess } from "./taskClockProcess.js";
 import { PiHarnessAdapter } from "./piHarness.js";
 import { spawnEngine } from "./cliEngineSpawn.js";
 import { readChild } from "./cliChildOutput.js";
@@ -21,6 +22,13 @@ test("libfaketime changes actual CLI, MCP, Pi bash and descendant clocks across 
   process.env = { ...previous, NOOPOLIS_RUN_ID: "live-clock", LD_PRELOAD: library, NOOPOLIS_TASK_CLOCK: JSON.stringify({ version: "noopolis.task-clock.v1", origin: "2001-01-01T00:00:00Z", anchorEpochMs: anchor }) };
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-libfaketime-"));
   t.after(async () => { process.env = previous; await rm(root, { recursive: true, force: true }); });
+  const historical = process.env.NOOPOLIS_TASK_CLOCK;
+  for (const offsetMs of [0, 3000, -3000]) {
+    const realNow = Date.now();
+    process.env.NOOPOLIS_TASK_CLOCK = JSON.stringify({ version: "noopolis.task-clock.v1", origin: new Date(realNow + offsetMs).toISOString(), anchorEpochMs: realNow });
+    await verifyTaskClockProcess(root);
+  }
+  process.env.NOOPOLIS_TASK_CLOCK = historical;
   const observed: number[] = [];
   const check = (result: { languageMs: number; dateSeconds: number }) => {
     for (const value of [result.languageMs, result.dateSeconds * 1000]) assert.ok(Math.abs(value - readTaskClock()!.now()) < 5000, `process clock ${value} must observe task time`);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseTaskClock, readTaskClock, taskClockChildEnvironment, taskClockPreload, taskClockTimestamp, TASK_CLOCK_VERSION } from "./taskClock.js";
+import { parseTaskClock, readTaskClock, taskClockChildEnvironment, taskClockPreload, taskClockProcessEnvironment, taskClockTimestamp, TASK_CLOCK_VERSION } from "./taskClock.js";
 
 const config = { version: TASK_CLOCK_VERSION, origin: "2024-02-29T12:30:00.125+02:00", anchorEpochMs: 1_800_000_000_000 };
 
@@ -11,8 +11,7 @@ test("task clock advances from the original anchor and preserves the exact contr
   assert.equal(clock.now(), Date.parse(config.origin) + 2500);
   assert.equal(taskClockTimestamp(new Date(config.anchorEpochMs + 500).toISOString(), clock), "2024-02-29T10:30:00.625Z");
   assert.deepEqual(taskClockChildEnvironment({}, clock, {}), {
-    NOOPOLIS_TASK_CLOCK: raw, MNEME_CLOCK_ORIGIN: config.origin, MNEME_CLOCK_ANCHOR_MS: String(config.anchorEpochMs),
-    FAKETIME: String(Math.round((Date.parse(config.origin) - config.anchorEpochMs) / 1000)), FAKETIME_DONT_FAKE_MONOTONIC: "1"
+    FAKETIME: "-90797399.875", FAKETIME_DONT_FAKE_MONOTONIC: "1", LC_ALL: "C"
   });
 });
 
@@ -41,12 +40,15 @@ test("unset clock derives no variables and preserves timestamps", () => {
   assert.deepEqual(taskClockChildEnvironment({ MNEME_CLOCK_ORIGIN: "declared" }, readTaskClock({})), {});
   assert.equal(taskClockTimestamp(config.origin, readTaskClock({})), config.origin);
 });
-test("declared clock values must agree exactly, including the serialized anchor", () => {
-  const clock = parseTaskClock(JSON.stringify(config))!, env = taskClockChildEnvironment({}, clock);
-  assert.deepEqual(taskClockChildEnvironment(env, clock), env);
-  for (const name of Object.keys(env)) {
-    assert.throws(() => taskClockChildEnvironment({ [name]: "different" }, clock), new RegExp(`conflicts with ${name}`));
+test("every declared clock control is rejected, even empty or equal to the derived value", () => {
+  const clock = parseTaskClock(JSON.stringify(config))!, environment = { LD_PRELOAD: "/caller/libfaketime.so.1" };
+  const derived = taskClockChildEnvironment({}, clock, environment);
+  for (const name of ["LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "DYLD_FUTURE", "FAKETIME", "FAKETIME_DONT_FAKE_MONOTONIC", "FAKETIME_SKIP_CMDS", "FAKETIME_ONLY_CMDS", "FAKETIME_FUTURE", "NOOPOLIS_TASK_CLOCK", "MNEME_CLOCK_ORIGIN", "MNEME_CLOCK_ANCHOR_MS", "MNEME_CLOCK_FUTURE"]) {
+    for (const value of ["", derived[name] ?? "declared"]) {
+      assert.throws(() => taskClockChildEnvironment({ [name]: value }, clock, environment), new RegExp(`conflicts with ${name}`));
+    }
   }
+  assert.deepEqual(taskClockChildEnvironment({ ORDINARY: "retained" }, clock, environment), derived);
 });
 
 
@@ -61,20 +63,30 @@ test("libfaketime allowlist rejects mixed or unrelated loader values", () => {
   }
 });
 
-test("relative offsets use signed integer seconds, including zero and rounding", () => {
-  for (const [offset, expected] of [[-3600000, "-3600"], [120000, "+120"], [0, "+0"], [1499, "+1"], [1500, "+2"], [-1501, "-2"]] as const) {
+test("relative offsets preserve signed milliseconds, including the shared Spawnfile vector", () => {
+  for (const [offset, expected] of [[-3600000, "-3600"], [120000, "+120"], [0, "+0"], [499, "+0.499"], [500, "+0.500"], [1499, "+1.499"], [1500, "+1.500"], [-1501, "-1.501"], [-1, "-0.001"]] as const) {
     const clock = parseTaskClock(JSON.stringify({ ...config, origin: new Date(config.anchorEpochMs + offset).toISOString() }))!;
     assert.equal(taskClockChildEnvironment({}, clock).FAKETIME, expected);
   }
+  const clock = parseTaskClock(JSON.stringify({ ...config, origin: "2001-01-01T00:00:00.000Z", anchorEpochMs: 1821692800250 }))!;
+  assert.equal(taskClockChildEnvironment({}, clock).FAKETIME, "-843385600.250");
 });
 
-test("all process clock declarations must match the caller-derived values", () => {
+test("child process time and host task time agree at second, midnight and leap-day boundaries", () => {
+  for (const origin of ["2000-02-28T23:59:59.999Z", "2000-02-29T23:59:59.500Z", "2001-01-01T00:00:00.000Z"]) {
+    const clock = parseTaskClock(JSON.stringify({ ...config, origin, anchorEpochMs: 1821692800250 }))!;
+    const offsetMs = Number(taskClockChildEnvironment({}, clock).FAKETIME) * 1000;
+    for (const elapsed of [0, 1, 499, 500, 1000]) {
+      assert.equal(new Date(clock.anchorEpochMs + elapsed + offsetMs).toISOString(), new Date(clock.at(clock.anchorEpochMs + elapsed)).toISOString());
+    }
+  }
+});
+
+test("inherited environments strip every offset and loader control before assigning the process clock", () => {
   const clock = parseTaskClock(JSON.stringify(config))!;
   const environment = { LD_PRELOAD: "/caller/libfaketime.so.1" };
   const expected = taskClockChildEnvironment({}, clock, environment);
-  assert.deepEqual(taskClockChildEnvironment(expected, clock, environment), expected);
-  for (const name of ["FAKETIME", "FAKETIME_DONT_FAKE_MONOTONIC", "LD_PRELOAD"]) {
-    assert.throws(() => taskClockChildEnvironment({ [name]: "conflict" }, clock, environment), new RegExp(`conflicts with ${name}`));
-  }
-  assert.throws(() => taskClockChildEnvironment({ LD_PRELOAD: environment.LD_PRELOAD }, clock, {}), /conflicts with LD_PRELOAD/u);
+  const inherited = { PATH: "/bin", NOOPOLIS_TASK_CLOCK: clock.raw, MNEME_CLOCK_ORIGIN: clock.origin, MNEME_CLOCK_ANCHOR_MS: String(clock.anchorEpochMs), MNEME_CLOCK_FUTURE: "1", FAKETIME: "wrong", FAKETIME_SKIP_CMDS: "node", FAKETIME_ONLY_CMDS: "date", DYLD_INSERT_LIBRARIES: "/other", LD_PRELOAD: "/other.so" };
+  assert.deepEqual(taskClockProcessEnvironment(inherited, expected), { PATH: "/bin", ...expected });
+  assert.deepEqual(taskClockProcessEnvironment(inherited, {}), inherited);
 });

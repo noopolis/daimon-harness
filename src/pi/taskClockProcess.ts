@@ -17,14 +17,20 @@ export async function verifyTaskClockProcess(
   runtimeHomePath: string, clock: TaskClock | undefined = readTaskClock(), probe: TaskClockProcessProbe = dateProbe
 ): Promise<void> {
   if (clock === undefined) return;
-  const environment = cliChildEnvironment([], runtimeHomePath);
   const refuse = (reason: string): Error => new Error(`NOOPOLIS_TASK_CLOCK: process clock startup probe ${reason}; refusing clocked execution`);
+  if (process.platform !== "linux") throw refuse("requires Linux libfaketime interposition");
+  const environment = cliChildEnvironment([], runtimeHomePath);
   if (taskClockPreload(environment.LD_PRELOAD) === undefined) throw refuse("requires caller-provided LD_PRELOAD naming libfaketime*.so*");
-  let output: string;
-  try { output = await probe("date", ["-u", "+%s"], environment); }
-  catch (cause) { throw new Error(refuse("could not run date -u +%s (date/libfaketime missing or unusable)").message, { cause }); }
-  const seconds = Number(output.trim());
-  if (!/^-?\d+$/u.test(output.trim()) || !Number.isSafeInteger(seconds) || Math.abs(seconds * 1000 - clock.now()) > 5000) {
-    throw refuse("did not observe task time within ±5 seconds (check libfaketime and its offset)");
+  // Prove interposition independently: real time must never pass for a near-zero task offset.
+  for (const sentinel of [true, false]) {
+    const env = sentinel ? { ...environment, FAKETIME: "-31536000" } : environment;
+    let output: string;
+    try { output = await probe("date", ["-u", "+%s"], env); }
+    catch (cause) { throw new Error(refuse("could not run date -u +%s (date/libfaketime missing or unusable)").message, { cause }); }
+    const seconds = Number(output.trim());
+    const expected = sentinel ? Date.now() - 31_536_000_000 : clock.now();
+    if (!/^-?\d+$/u.test(output.trim()) || !Number.isSafeInteger(seconds) || Math.abs(seconds * 1000 - expected) > 5000) {
+      throw refuse(`did not observe ${sentinel ? "sentinel offset" : "task time"} within ±5 seconds (check libfaketime and its offset)`);
+    }
   }
 }

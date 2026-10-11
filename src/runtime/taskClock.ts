@@ -35,22 +35,36 @@ export function taskClockChildEnvironment(
   declared: NodeJS.ProcessEnv = {}, clock = readTaskClock(), environment: NodeJS.ProcessEnv = process.env
 ): Record<string, string> {
   if (clock === undefined) return {};
-  const seconds = Math.round((Date.parse(clock.origin) - clock.anchorEpochMs) / 1000);
+  for (const name of Object.keys(declared)) {
+    if (declared[name] !== undefined && clockVariable(name)) throw invalid(`declared child environment conflicts with ${name}`);
+  }
+  // Integer arithmetic keeps every millisecond even at the safe-integer anchor limits.
+  const offset = BigInt(Date.parse(clock.origin)) - BigInt(clock.anchorEpochMs);
+  const magnitude = offset < 0n ? -offset : offset;
+  const fraction = magnitude % 1000n;
+  const seconds = `${offset < 0n ? "-" : "+"}${magnitude / 1000n}${fraction === 0n ? "" : `.${String(fraction).padStart(3, "0")}`}`;
   const preload = taskClockPreload(environment.LD_PRELOAD);
-  const derived: Record<string, string> = {
-    [TASK_CLOCK_ENV]: clock.raw,
-    MNEME_CLOCK_ORIGIN: clock.origin,
-    MNEME_CLOCK_ANCHOR_MS: String(clock.anchorEpochMs),
+  return {
+    // The child process clock owns the offset; Mneme and nested consumers use Date.now().
     // libfaketime's relative format defaults to seconds; an `s` suffix is not supported.
-    FAKETIME: `${seconds < 0 ? "" : "+"}${seconds}`,
+    FAKETIME: seconds,
     FAKETIME_DONT_FAKE_MONOTONIC: "1",
+    // libfaketime parses decimal fractions using the process locale.
+    LC_ALL: "C",
     ...(preload === undefined ? {} : { LD_PRELOAD: preload })
   };
-  for (const name of [...Object.keys(derived), "LD_PRELOAD"]) {
-    const value = derived[name];
-    if (declared[name] !== undefined && declared[name] !== value) throw invalid(`declared child environment conflicts with ${name}`);
-  }
-  return derived;
+}
+
+/** Inherited environments must not reintroduce another offset owner or loader controls. */
+export function taskClockProcessEnvironment(
+  inherited: NodeJS.ProcessEnv, derived = taskClockChildEnvironment()
+): NodeJS.ProcessEnv {
+  if (Object.keys(derived).length === 0) return inherited;
+  return { ...Object.fromEntries(Object.entries(inherited).filter(([name]) => !clockVariable(name))), ...derived };
+}
+
+function clockVariable(name: string): boolean {
+  return /^(?:LD_PRELOAD$|DYLD_|FAKETIME|NOOPOLIS_TASK_CLOCK$|MNEME_CLOCK_)/u.test(name);
 }
 
 /** Reject mixed loader lists: unrelated libraries must never ride this exception. */

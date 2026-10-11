@@ -295,8 +295,21 @@ test("restart inside a jitter window neither fires early nor drifts the persiste
 
 async function privateRoot(): Promise<string> { const root = await mkdtemp(path.join(os.tmpdir(), "daimon-schedule-")); await chmod(root, 0o700); return root; }
 async function readState(root: string): Promise<string> { return await import("node:fs/promises").then(({ readFile }) => readFile(path.join(root, "schedule-state.v1.json"), "utf8")); }
+test("restored schedule timestamps cover years 0000 through 9999 and reject invalid instants", async () => {
+  const minimum = Date.parse("0000-01-01T00:00:00.000Z"), maximum = Date.parse("9999-12-31T23:59:59.999Z");
+  for (const due of [minimum, -1, 0, maximum, minimum - 1, maximum + 1, Number.MAX_SAFE_INTEGER, 1.5]) {
+    const root = await privateRoot();
+    await seedState(root, every, due);
+    const controller = createScheduleController({ acceptanceStorePath: root, agents: [agent(every)], accept: async () => false, now: () => due - 1, ...fakeTimers().options });
+    try {
+      if ([minimum, -1, 0, maximum].includes(due)) await controller.start();
+      else await assert.rejects(controller.start(), /schedule state is invalid/u);
+    } finally { await controller.stop(); await rm(root, { recursive: true, force: true }); }
+  }
+});
+
 async function seedState(root: string, schedule: typeof every, due: number): Promise<void> {
-  const key = occurrenceFor("alpha", schedule, due).deliveryId.split(":")[1]!;
+  const key = occurrenceFor("alpha", schedule, 0).deliveryId.split(":")[1]!;
   await writeFile(path.join(root, "schedule-state.v1.json"), JSON.stringify({ version: "noopolis.daimon.schedule-state.v1", schedules: { [key]: { next_due_ms: due } } }), { mode: 0o600 });
 }
 function scheduleRequest(occurrence: ReturnType<typeof occurrenceFor>) {
