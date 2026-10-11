@@ -67,7 +67,9 @@ test("startup probes sentinel and offset once and Pi bash receives only the proc
   assert.equal(prompts[0], formatWakePrompt({ id: "one", kind: "manual", text: "hello" }));
   assert.match(prompts[1]!, /^## Dream Mode/u);
   for (const result of childResults) {
-    assert.ok(result.trim().endsWith(["-90799200.123", "1", "/caller/libfaketime.so.1", ...Array(7).fill("unset")].join("\n")));
+    // Pi merges stdout and stderr; Linux warns about the intentionally fake preload path.
+    const lines = result.trim().split("\n").filter((line) => line !== "ERROR: ld.so: object '/caller/libfaketime.so.1' from LD_PRELOAD cannot be preloaded (cannot open shared object file): ignored.");
+    assert.deepEqual(lines, ["-90799200.123", "1", "/caller/libfaketime.so.1", ...Array(7).fill("unset")]);
   }
   delete process.env.NOOPOLIS_TASK_CLOCK;
 
