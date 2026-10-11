@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import { cliChildEnvironment } from "../pi/cliEnvironment.js";
+import { taskClockChildEnvironment } from "./taskClock.js";
 import type { OrganizationRuntimeAgentConfig } from "./organizationRuntime.js";
 import { hasRefreshablePortableCredential, portableCredentialSecretValues } from "./portableCredentialAuth.js";
 
@@ -107,7 +108,7 @@ async function resolveExecutable(agentId: string, engine: "codex" | "grok" | "ag
 
 async function probeExecutable(agentId: string, executablePath: string, engine: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(executablePath, ["--version"], { cwd: path.dirname(executablePath), env: { PATH: process.env.PATH ?? path.dirname(executablePath), LANG: "C", LC_ALL: "C" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(executablePath, ["--version"], { cwd: path.dirname(executablePath), env: { PATH: process.env.PATH ?? path.dirname(executablePath), LANG: "C", LC_ALL: "C", ...taskClockChildEnvironment() }, stdio: ["ignore", "pipe", "pipe"] });
     let bytes = 0;
     const output: Buffer[] = [];
     // Only stdout fingerprints the capability. stderr carries environment-dependent

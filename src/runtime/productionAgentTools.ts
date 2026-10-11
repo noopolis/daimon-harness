@@ -222,7 +222,7 @@ async function priorReceipt(agent: OrganizationRuntimeAgentConfig, deliveryId: s
 async function machine(cli: string, config: string, network: string, request: unknown): Promise<Record<string, unknown>> {
   const clockEnvironment = taskClockChildEnvironment();
   return await new Promise((resolve, reject) => {
-    const child = spawn(cli, ["machine", "--config", config, "--network", network], { stdio: ["pipe", "pipe", "pipe"], ...(Object.keys(clockEnvironment).length === 0 ? {} : { env: { ...process.env, ...clockEnvironment } }) });
+    const child = spawn(cli, ["machine", "--config", config, "--network", network], { stdio: ["pipe", "pipe", "pipe"], ...(Object.keys(clockEnvironment).length === 0 ? {} : { env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== "LD_PRELOAD")), ...clockEnvironment } }) });
     let output = "", error = "", settled = false;
     const settle = (action: () => void): void => { if (settled) return; settled = true; clearTimeout(timer); action(); };
     const timer = setTimeout(() => { child.kill("SIGKILL"); settle(() => reject(new Error("Moltnet machine timed out"))); }, TIMEOUT);

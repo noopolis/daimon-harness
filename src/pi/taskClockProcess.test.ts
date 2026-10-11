@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
+import { cliChildEnvironment } from "./cliEnvironment.js";
+import { PiHarnessAdapter } from "./piHarness.js";
+import { verifyTaskClockProcess, type TaskClockProcessProbe } from "./taskClockProcess.js";
+import { readTaskClock } from "../runtime/taskClock.js";
+
+function environment(t: TestContext) {
+  const previous = process.env;
+  process.env = { ...previous, NOOPOLIS_TASK_CLOCK: JSON.stringify({ version: "noopolis.task-clock.v1", origin: "2001-01-01T00:00:00Z", anchorEpochMs: Date.now() }), LD_PRELOAD: "/caller/libfaketime.so.1" };
+  t.after(() => { process.env = previous; });
+}
+
+test("startup probe uses date argv without a shell and the exact CLI child environment", async (t) => {
+  environment(t);
+  let calls = 0;
+  await verifyTaskClockProcess("/runtime", undefined, async (command, args, env) => {
+    calls++;
+    assert.equal(command, "date"); assert.deepEqual(args, ["-u", "+%s"]);
+    assert.deepEqual(env, cliChildEnvironment([], "/runtime"));
+    return `${Math.floor(readTaskClock()!.now() / 1000)}\n`;
+  });
+  assert.equal(calls, 1);
+  delete process.env.NOOPOLIS_TASK_CLOCK;
+  await verifyTaskClockProcess("/runtime", undefined, async () => { throw new Error("unset must not probe"); });
+});
+
+test("startup refuses mismatched, malformed, missing-date and missing-preload observations", async (t) => {
+  environment(t);
+  for (const output of [String(Math.floor(Date.now() / 1000)), "", "not-a-time", "NaN", `${Math.floor(readTaskClock()!.now() / 1000) + 6}`]) {
+    await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async () => output), /did not observe task time.*refusing clocked execution/u);
+  }
+  await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async () => { throw Object.assign(new Error("date"), { code: "ENOENT" }); }), /date\/libfaketime missing or unusable/u);
+  for (const value of [undefined, "/tmp/libunrelated.so", "/caller/libfaketime.so.1:/tmp/libunrelated.so"]) {
+    if (value === undefined) delete process.env.LD_PRELOAD; else process.env.LD_PRELOAD = value;
+    let probes = 0;
+    await assert.rejects(verifyTaskClockProcess("/runtime", undefined, async () => { probes++; return String(Math.floor(readTaskClock()!.now() / 1000)); }), /requires caller-provided LD_PRELOAD/u);
+    assert.equal(probes, 0);
+  }
+});
+
+test("the real date probe refuses an unavailable preload instead of trusting variables", async (t) => {
+  environment(t);
+  // The path does not exist: Linux ignores it with a loader warning; macOS ignores LD_PRELOAD.
+  await assert.rejects(verifyTaskClockProcess(os.tmpdir()), /process clock startup probe.*refusing clocked execution/u);
+});
+
+test("a loader warning refuses startup even when date exits zero with matching output", async (t) => {
+  environment(t);
+  const root = await mkdtemp(path.join(os.tmpdir(), "daimon-date-diagnostic-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const command = path.join(root, "date");
+  await writeFile(command, `#!${process.execPath}\nprocess.stdout.write('${Math.floor(readTaskClock()!.now() / 1000)}\\n');process.stderr.write('loader: preload could not be loaded; ignored\\n');\n`);
+  await chmod(command, 0o700);
+  process.env.PATH = root;
+  await assert.rejects(verifyTaskClockProcess(root), /process clock startup probe could not run/u);
+});
+
+for (const mode of ["missing-preload", "mismatch", "missing-date"] as const) {
+  test(`Pi startup refuses ${mode} before home/session creation`, async (t) => {
+    environment(t);
+    if (mode === "missing-preload") delete process.env.LD_PRELOAD;
+    const root = await mkdtemp(path.join(os.tmpdir(), "daimon-probe-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    let sessions = 0;
+    const probe: TaskClockProcessProbe = async () => {
+      if (mode === "missing-date") throw new Error("ENOENT");
+      return String(Math.floor(Date.now() / 1000));
+    };
+    const adapter = new PiHarnessAdapter({ authPath: path.join(root, "auth.json"), sessionFactory: async () => { sessions++; throw new Error("session must not start"); } }, probe);
+    const home = path.join(root, "home");
+    await assert.rejects(adapter.startAgent({ id: "a", name: "A", instructions: "test", runtimeHomePath: home, workspacePath: path.join(root, "workspace") }), /process clock startup probe/u);
+    assert.equal(sessions, 0);
+    await assert.rejects(access(home), /ENOENT/u);
+  });
+}

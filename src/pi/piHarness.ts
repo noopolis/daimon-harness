@@ -27,6 +27,7 @@ import type { PiWorldToolContextRef } from "./worldNudge.js";
 import { ensureRuntimeHome, ensureRuntimeHomeDirectory } from "../runtime/runtimeHomeLayout.js";
 import { readTaskClock, taskClockChildEnvironment } from "../runtime/taskClock.js";
 import { createClockedMemoryRuntime, memoryClockOptions } from "./memoryClock.js";
+import { verifyTaskClockProcess, type TaskClockProcessProbe } from "./taskClockProcess.js";
 import {
   bindPiRawTrainingCapture,
   validatePiRawTrainingCaptureOptions,
@@ -94,7 +95,7 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
   private readonly modelRegistry: ModelRegistry;
   private readonly sessionFactory: PiSessionFactory;
 
-  constructor(private readonly options: PiHarnessOptions) {
+  constructor(private readonly options: PiHarnessOptions, /** @internal */ private readonly taskClockProbe?: TaskClockProcessProbe) {
     this.authStorage = AuthStorage.create(options.authPath);
     this.modelRegistry = createPiModelRegistry(this.authStorage, options);
     this.sessionFactory = options.sessionFactory ?? createAgentSession;
@@ -108,6 +109,7 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
     }
     const causalRunId = input.causalRunId === undefined ? undefined : resolveRunId(undefined, input.causalRunId);
     validatePiRawTrainingCaptureOptions(this.options.rawTrainingCapture);
+    await verifyTaskClockProcess(input.runtimeHomePath, taskClock, this.taskClockProbe);
     await ensureRuntimeHome(input.runtimeHomePath);
     await Promise.all([".config", ".local/share", ".local/state", ".cache", ".tmp", "tool-state"]
       .map((relative) => ensureRuntimeHomeDirectory(input.runtimeHomePath, relative)));
@@ -282,7 +284,7 @@ function createProtectedBashTool(
     spawnHook: (context) => ({
       ...context,
       env: {
-        ...Object.fromEntries(Object.entries(context.env).filter(([name]) => !protectedNames.includes(name))),
+        ...Object.fromEntries(Object.entries(context.env).filter(([name]) => !protectedNames.includes(name) && !(clockEnvironment.NOOPOLIS_TASK_CLOCK !== undefined && name === "LD_PRELOAD"))),
         HOME: runtimeHomePath,
         XDG_CONFIG_HOME: `${runtimeHomePath}/.config`,
         XDG_DATA_HOME: `${runtimeHomePath}/.local/share`,

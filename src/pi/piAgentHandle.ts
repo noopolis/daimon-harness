@@ -1,6 +1,6 @@
 import type { AgentHandle, AgentStatus, WakeEvent, WakeResult } from "../core/types.js";
 import { createTrustedPiMemoryToolContext, type PiMemoryToolContextRef } from "./memoryTools.js";
-import { formatWakePrompt, preserveModelFacingWakeIdentity, withTaskClockPrompt } from "./prompts.js";
+import { formatWakePrompt, preserveModelFacingWakeIdentity } from "./prompts.js";
 import {
   stampTurnInputSubmitted,
   stampTurnOutputCompleted,
@@ -199,7 +199,6 @@ export class PiAgentHandle implements AgentHandle {
       if (selectedSession.mode === "dream") {
         promptText = formatDreamPrompt(promptText, selectedSession.threadId);
       }
-      promptText = withTaskClockPrompt(promptText);
       stage = "causal_input";
       const turnInput = await this.stampTurnInputSubmitted({
         runId: this.causalRunId,

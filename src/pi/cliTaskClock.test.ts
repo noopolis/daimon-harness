@@ -8,15 +8,14 @@ import { spawnEngine } from "./cliEngineSpawn.js";
 import { readChild } from "./cliChildOutput.js";
 
 const raw = '{"version":"noopolis.task-clock.v1","origin":"2024-02-29T12:00:00+02:00","anchorEpochMs":1800000000123}';
-const expected = { NOOPOLIS_TASK_CLOCK: raw, MNEME_CLOCK_ORIGIN: "2024-02-29T12:00:00+02:00", MNEME_CLOCK_ANCHOR_MS: "1800000000123" };
+const expected = { NOOPOLIS_TASK_CLOCK: raw, MNEME_CLOCK_ORIGIN: "2024-02-29T12:00:00+02:00", MNEME_CLOCK_ANCHOR_MS: "1800000000123", FAKETIME: String(Math.round((Date.parse("2024-02-29T10:00:00Z") - 1800000000123) / 1000)), FAKETIME_DONT_FAKE_MONOTONIC: "1", LD_PRELOAD: "/caller/libfaketime.so.1" };
 
-test("CLI environments preserve clock bytes and anchor, deriving only the clock variables", (t) => {
-  const previous = process.env; process.env = { ...previous, ...expected, MNEME_CLOCK_ORIGIN: "stale", FAKETIME: "not-forwarded", FAKETIME_DONT_FAKE_MONOTONIC: "1", LD_PRELOAD: "not-forwarded" };
+test("CLI environments preserve clock bytes and anchor, deriving a relative process clock and forwarding only libfaketime", (t) => {
+  const previous = process.env; process.env = { ...previous, ...expected, MNEME_CLOCK_ORIGIN: "stale", FAKETIME: "not-forwarded", FAKETIME_DONT_FAKE_MONOTONIC: "1", LD_PRELOAD: expected.LD_PRELOAD };
   t.after(() => { process.env = previous; });
   for (const home of [undefined, "/runtime"]) for (const engine of ["codex", "grok", "agy"] as const) {
     const env = cliChildEnvironment([], home, { engine });
     for (const [name, value] of Object.entries(expected)) assert.equal(env[name], value);
-    for (const name of ["FAKETIME", "FAKETIME_DONT_FAKE_MONOTONIC", "LD_PRELOAD"]) assert.equal(env[name], undefined);
   }
   delete process.env.NOOPOLIS_TASK_CLOCK;
   const legacy = cliChildEnvironment([]);
@@ -27,7 +26,7 @@ test("CLI environments preserve clock bytes and anchor, deriving only the clock 
 });
 
 test("actual engine children receive the same origin and anchor; unset children receive none", async (t) => {
-  const previous = process.env; process.env = { ...previous, NOOPOLIS_TASK_CLOCK: raw };
+  const previous = process.env; process.env = { ...previous, NOOPOLIS_TASK_CLOCK: raw, LD_PRELOAD: expected.LD_PRELOAD };
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-clock-cli-"));
   t.after(async () => { process.env = previous; await rm(root, { recursive: true, force: true }); });
   const command = path.join(root, "engine");

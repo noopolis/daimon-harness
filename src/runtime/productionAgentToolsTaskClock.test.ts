@@ -10,20 +10,20 @@ import { cliChildEnvironment } from "../pi/cliEnvironment.js";
 import { readTaskClock } from "./taskClock.js";
 
 const raw = '{"version":"noopolis.task-clock.v1","origin":"2024-02-29T12:00:00+02:00","anchorEpochMs":1800000000123}';
-const expected = { NOOPOLIS_TASK_CLOCK: raw, MNEME_CLOCK_ORIGIN: "2024-02-29T12:00:00+02:00", MNEME_CLOCK_ANCHOR_MS: "1800000000123" };
+const expected = { NOOPOLIS_TASK_CLOCK: raw, MNEME_CLOCK_ORIGIN: "2024-02-29T12:00:00+02:00", MNEME_CLOCK_ANCHOR_MS: "1800000000123", FAKETIME: String(Math.round((Date.parse("2024-02-29T10:00:00Z") - 1800000000123) / 1000)), FAKETIME_DONT_FAKE_MONOTONIC: "1", LD_PRELOAD: "/caller/libfaketime.so.1" };
 async function fixture(t: TestContext) {
-  const previous = process.env; process.env = { ...previous, NOOPOLIS_TASK_CLOCK: raw };
+  const previous = process.env; process.env = { ...previous, NOOPOLIS_TASK_CLOCK: raw, LD_PRELOAD: expected.LD_PRELOAD };
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-clock-tools-"));
   t.after(async () => { process.env = previous; await rm(root, { recursive: true, force: true }); });
   const agent: OrganizationRuntimeAgentConfig = { id: "a", name: "A", instructions: "test", workspacePath: root, runtimeHomePath: root, engine: { kind: "codex" } };
   return { root, agent };
 }
-test("MCP discovery and call children receive the CLI clock unchanged, with no ambient faketime passthrough", async (t) => {
+test("MCP discovery and call children receive the CLI clock unchanged, with derived faketime and caller-owned libfaketime", async (t) => {
   const { agent } = await fixture(t);
-  process.env.FAKETIME = "do-not-forward"; process.env.FAKETIME_DONT_FAKE_MONOTONIC = "1"; process.env.LD_PRELOAD = "do-not-forward";
+  process.env.FAKETIME = "do-not-forward"; process.env.FAKETIME_DONT_FAKE_MONOTONIC = "1"; process.env.LD_PRELOAD = expected.LD_PRELOAD;
   const server = { name: "clock", transport: "stdio" as const, command: process.execPath, args: [path.resolve("src/runtime/fixtures/testMcpServer.mjs")], env: { DAIMON_TEST_MCP_TOOLS: "task_clock", ...expected }, tools: ["task_clock"] };
   // No declared clock variables: removing propagation must break this assertion.
-  const { NOOPOLIS_TASK_CLOCK: _task, MNEME_CLOCK_ORIGIN: _origin, MNEME_CLOCK_ANCHOR_MS: _anchor, ...declared } = server.env;
+  const declared = { DAIMON_TEST_MCP_TOOLS: "task_clock" };
   for (const env of [declared, server.env]) {
     const [tool] = await createProductionAgentTools({ ...agent, mcp: [{ ...server, env }] }, { current: `wake-${Object.keys(env).length}` });
     const result = await tool!.execute("call", {}, undefined, undefined, {} as never);

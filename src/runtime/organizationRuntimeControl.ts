@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readTaskClock, taskClockTimestamp } from "./taskClock.js";
+import { readTaskClock } from "./taskClock.js";
 import { parseOrganizationRuntimeConfig, parseOrganizationRuntimeWakeRequest, type OrganizationRuntimeConfig, type OrganizationRuntimeHost, type OrganizationRuntimeShutdownCompletion } from "./organizationRuntime.js";
 import { createOrganizationRuntimeHostWithAttention } from "./organizationRuntimeHost.js";
 import { WakeFuse, type WakeBudgetSnapshot } from "./wakeFuse.js";
@@ -162,9 +162,11 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
         fusePoll.unref();
         if (config.version === "noopolis.daimon.organization-runtime.v2") {
           schedules = createScheduleController({ acceptanceStorePath: options.acceptanceStorePath, agents: config.agents, ...options.scheduleOptions,
+            // Calendar selection/state use task instants; due - taskNow remains a real delay.
+            now: () => { const realNow = (options.scheduleOptions?.now ?? Date.now)(); return clock?.at(realNow) ?? realNow; },
             accept: async (occurrence) => {
               if (dispatcher?.busy(occurrence.agentId) || hardReason() || drainedSince !== undefined) return false;
-              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: taskClockTimestamp(occurrence.occurredAt, clock) } });
+              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: occurrence.occurredAt } });
               return result.state === "accepted";
             }
           });

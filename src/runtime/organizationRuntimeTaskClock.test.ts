@@ -42,7 +42,7 @@ test("task time fails closed for native broker workers whose fixed environment c
   await assert.rejects(prepareProductionReadiness(parsed), /NOOPOLIS_TASK_CLOCK.*native Grok engine broker/u);
   await assert.rejects(startOrganizationRuntimeEngine(parsed.agents[0]!, "CLOCK_TEST_TOKEN", undefined, undefined, {} as EngineBrokerTurnClient), /NOOPOLIS_TASK_CLOCK.*native Grok engine broker/u);
 });
-test("schedule timers and state remain real while generated inbox occurrence time is task time", { timeout: 5000 }, async (t) => {
+test("schedule delays remain real while durable occurrences and delivery IDs use task time", { timeout: 5000 }, async (t) => {
   environment(t);
   const realAnchor = Date.now();
   let realNow = realAnchor;
@@ -65,11 +65,12 @@ test("schedule timers and state remain real while generated inbox occurrence tim
   });
   t.after(async () => { try { await control.stop(); } finally { await rm(root, { recursive: true, force: true }); } });
   await control.start();
-  assert.equal(delay, 1000, "scheduler default must remain Date.now, not task now");
+  assert.equal(delay, 1000, "one task second is one real second");
   const state = JSON.parse(await readFile(path.join(root, "schedule-state.v1.json"), "utf8"));
-  assert.equal((Object.values(state.schedules)[0] as { next_due_ms: number }).next_due_ms, realAnchor + 1000);
+  assert.equal((Object.values(state.schedules)[0] as { next_due_ms: number }).next_due_ms, Date.parse("2024-02-29T10:00:01.000Z"));
   realNow += 1000; timer!();
   const event = await seen;
   assert.match(event.text, /2024-02-29T10:00:01\.000Z/u);
   assert.equal((inbox as { messages: { occurred_at: string }[] }).messages[0]!.occurred_at, "2024-02-29T10:00:01.000Z");
+  assert.match((inbox as { messages: { delivery_id: string }[] }).messages[0]!.delivery_id, /:2024-02-29T10:00:01\.000Z$/u);
 });

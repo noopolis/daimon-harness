@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { WakeEvent } from "../core/types.js";
 import { createClockedMemoryRuntime } from "../pi/memoryClock.js";
-import { withTaskClockPrompt } from "../pi/prompts.js";
+import { verifyTaskClockProcess } from "../pi/taskClockProcess.js";
 import type { MemoryRecallAudit, MemoryRuntime } from "@noopolis/mneme";
 import { runEngineDetailed, type CliEngineKind as EngineKind, type EngineRunResult } from "../pi/cliSession.js";
 
@@ -42,6 +42,7 @@ export class JungianVoice {
   readonly runtimeHomePath: string;
   readonly workspacePath: string;
   private readonly memory: MemoryRuntime;
+  private clockReady?: Promise<void>;
 
   constructor(readonly config: JungianVoiceConfig) {
     this.workspacePath = path.join(config.runtimeRoot, "selves", config.selfId, "voices", config.id, "workspace");
@@ -55,6 +56,7 @@ export class JungianVoice {
   }
 
   async prepare(): Promise<void> {
+    await (this.clockReady ??= verifyTaskClockProcess(this.runtimeHomePath));
     await mkdir(this.workspacePath, { recursive: true });
     await mkdir(this.runtimeHomePath, { recursive: true });
     await writeFile(
@@ -77,6 +79,7 @@ export class JungianVoice {
   }
 
   async wake(event: WakeEvent): Promise<JungianVoiceTurn> {
+    await (this.clockReady ??= verifyTaskClockProcess(this.runtimeHomePath));
     const startedAt = Date.now();
     const prepareStartedAt = Date.now();
     const prepared = await this.memory.prepareTurn({
@@ -87,7 +90,7 @@ export class JungianVoice {
       context: event.context ?? {}
     });
     const memoryPrepareMs = Date.now() - prepareStartedAt;
-    const promptText = withTaskClockPrompt([
+    const promptText = [
       `${this.config.name} (${this.config.id})`,
       `Self: ${this.config.selfName} (${this.config.selfId})`,
       `Role: ${this.config.archetype ?? "Representative Self"}`,
@@ -100,7 +103,7 @@ export class JungianVoice {
       "",
       "Current wake:",
       event.text
-    ].join("\n"));
+    ].join("\n");
 
     const engineResult = await runEngineDetailed(this.config.engine, promptText, {
       runtimeHomePath: this.runtimeHomePath,

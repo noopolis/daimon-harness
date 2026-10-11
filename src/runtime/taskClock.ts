@@ -30,20 +30,33 @@ export function parseTaskClock(raw: string | undefined): TaskClock | undefined {
   return Object.freeze({ raw, origin, anchorEpochMs, at, now: () => at(Date.now()) });
 }
 
-/** Only these three variables are derived; loader/faketime policy stays with the caller. */
+/** The caller installs libfaketime; Daimon derives one process-independent offset. */
 export function taskClockChildEnvironment(
-  declared: NodeJS.ProcessEnv = {}, clock = readTaskClock()
+  declared: NodeJS.ProcessEnv = {}, clock = readTaskClock(), environment: NodeJS.ProcessEnv = process.env
 ): Record<string, string> {
   if (clock === undefined) return {};
-  const derived = {
+  const seconds = Math.round((Date.parse(clock.origin) - clock.anchorEpochMs) / 1000);
+  const preload = taskClockPreload(environment.LD_PRELOAD);
+  const derived: Record<string, string> = {
     [TASK_CLOCK_ENV]: clock.raw,
     MNEME_CLOCK_ORIGIN: clock.origin,
-    MNEME_CLOCK_ANCHOR_MS: String(clock.anchorEpochMs)
+    MNEME_CLOCK_ANCHOR_MS: String(clock.anchorEpochMs),
+    // libfaketime's relative format defaults to seconds; an `s` suffix is not supported.
+    FAKETIME: `${seconds < 0 ? "" : "+"}${seconds}`,
+    FAKETIME_DONT_FAKE_MONOTONIC: "1",
+    ...(preload === undefined ? {} : { LD_PRELOAD: preload })
   };
-  for (const [name, value] of Object.entries(derived)) {
+  for (const name of [...Object.keys(derived), "LD_PRELOAD"]) {
+    const value = derived[name];
     if (declared[name] !== undefined && declared[name] !== value) throw invalid(`declared child environment conflicts with ${name}`);
   }
   return derived;
+}
+
+/** Reject mixed loader lists: unrelated libraries must never ride this exception. */
+export function taskClockPreload(value: string | undefined): string | undefined {
+  const libraries = value?.split(/[\s:]+/u).filter(Boolean);
+  return libraries?.length && libraries.every((library) => /^libfaketime[^/]*\.so[^/]*$/u.test(library.split("/").at(-1)!)) ? value : undefined;
 }
 
 /** Use only for Daimon-owned real timestamps, never external/historical payloads. */

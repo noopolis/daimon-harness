@@ -63,7 +63,7 @@ Daimon forwards the original JSON bytes to engine CLI and MCP stdio children,
 Pi bash tools and Moltnet CLI children. It also derives `MNEME_CLOCK_ORIGIN`
 and `MNEME_CLOCK_ANCHOR_MS` from that same origin and anchor. It never resets
 the anchor when a process starts. Any conflicting server-declared value of
-these three variables refuses startup, including declarations for remote MCP
+the derived variables refuses startup, including declarations for remote MCP
 servers; matching values are allowed. This prevents silent clock divergence.
 Remote MCP services must be launched with the same contract by their owner;
 Daimon cannot set another service's process environment.
@@ -72,30 +72,55 @@ In-process memory requires Mneme's root `createOffsetClock` export and
 `createMemoryRuntime({ clock })` support. Daimon detects that export in one
 adapter and passes its epoch-ms clock to the memory runtime. A configured
 clock with an older Mneme refuses startup and names both required capabilities.
-The dependency version is unchanged. Memory policy and storage remain Mneme's.
+Detection proves that the export exists, not that Mneme behaves correctly. A
+supported-Mneme integration test will land when that release exists. The dependency
+version is unchanged. Memory policy and storage remain Mneme's.
 
 The current native Grok broker has a fixed worker environment without clock
 propagation. Task-clock runs using that broker refuse startup explicitly;
 they require a separate native broker contract/artifact update. Direct engine
-CLI children receive the three variables through the normal CLI environment.
+CLI children receive the clock through the normal CLI environment.
 
-Daimon does not add ambient `FAKETIME`, `FAKETIME_DONT_FAKE_MONOTONIC` or
-`LD_PRELOAD` forwarding to its positive CLI/MCP environment. Existing inherited
-environments (Pi bash and Moltnet) keep their previous policy. The contract
-does not patch `Date`, OS clocks or arbitrary executables: child processes
-must consume it, and OS-level clock virtualization remains caller-owned.
+The caller's image must install libfaketime and supply `LD_PRELOAD` in Daimon's
+own environment. For clocked children only, Daimon forwards that value when every
+library basename matches `libfaketime*.so*`; unrelated or mixed loader lists are
+not forwarded. It derives `FAKETIME` as the signed integer
+`round((originMs - anchorEpochMs) / 1000)` and sets
+`FAKETIME_DONT_FAKE_MONOTONIC=1`. For example, `FAKETIME=-3600` means one hour
+behind real time, consistently across processes started at different times.
+[Libfaketime's relative format](https://github.com/wolfcw/libfaketime#readme)
+uses seconds by default; it documents `m`, `h`, `d`, `y` multipliers, not an `s`
+suffix. A conflicting server declaration of either `FAKETIME` variable or
+`LD_PRELOAD` is a startup error too; a server cannot supply its own preload.
+
+Before its first session/wake, each agent runs one bounded `date -u +%s` probe
+(argv, no shell) using the same CLI child-environment builder. Missing libfaketime
+preload, a failed/missing `date`, or an observation more than five seconds from
+task now refuses startup. Later wakes and dream sessions do not repeat the probe.
+Daimon's own wall clock must remain real: the caller supplies the library, not a
+shifted parent clock. Daimon never patches global `Date`. The probe verifies the
+local process mechanism; remotely hosted MCP services still need their owner's
+clock support. Unset clocks preserve existing environments.
+
+Schedules select cron/timezone occurrences in task time and persist those task
+instants, including occurrence IDs. Real timers wait `due - taskNow`, since the
+clock advances at the real rate. Restart uses that persisted task-calendar state
+and the original shared anchor. Use a separate acceptance store for a different
+clock contract; existing state is not translated between calendars.
 
 | Time surface | Clock / treatment |
 | --- | --- |
-| Final wake prompt, including memory, world, dream and direct-memory example wakes (`piAgentHandle`, `prompts`, `jungianPlayAgent`) | Current advancing task time is prepended when configured. |
+| Final wake prompt, including memory, world, dream and direct-memory example wakes (`piAgentHandle`, `prompts`, `jungianPlayAgent`) | Byte-identical for the same formatted input; no clock prefix or wrapper. |
 | Mneme prompts, memory tools, recall and storage | Mneme receives `clock`; Daimon does not rewrite memory data. |
-| Native schedule occurrence shown in attention prompt / `daimon_inbox` (`organizationRuntimeControl`) | Convert the real occurrence to task time at delivery creation. |
+| Native schedule occurrence shown in attention prompt / `daimon_inbox` (`organizationRuntimeControl`) | Select occurrences in task time; timestamps and delivery IDs refer to that task-calendar occurrence. |
 | Incoming wake/inbox `occurred_at` | Producer-owned event time, preserved; producers must use the task clock for newly generated events. Never apply the offset twice. |
 | Replayed `moltnet_send` receipt `at` (`productionAgentTools`) | Convert the stored real timestamp to task time for both model-visible result channels. |
 | `moltnet_read`, external MCP results, world ticks | Historical/external payloads remain verbatim; clock-aware external tools own their current timestamps. |
-| Schedule due times, sleeps, wake/CLI/MCP/world deadlines, auth expiry, claim leases, retention, fuses, latency | Real time, unchanged. Fuse epoch and delivery identifiers remain opaque identifiers. |
+| Schedule due times and persisted schedule state | Task-calendar instants when clocked; real timer delays. |
+| Sleeps, wake/CLI/MCP/world deadlines, auth expiry, claim leases, retention, fuses, latency | Real time, unchanged. |
+| Budget epoch in `daimon_inbox` | Stable SHA-256 opaque reference when clocked; internal fuse epoch/accounting and real-day rollover are unchanged. Delivery IDs remain directly usable for disposition. |
 | Activity/health (`organizationRuntimeHost`, `piAgentHandle`), drain state (`organizationRuntimeControl`) | Real operational bookkeeping on control APIs. |
-| Acceptance receipts/reconciliation (`wakeAcceptanceStore`, `wakeAcceptanceReconciliation`), tool receipts (`productionAgentTools`), schedule state (`schedule`), fuse admissions/trips (`wakeFuse`) | Real timestamps on disk; model-visible projections are classified above. |
+| Acceptance receipts/reconciliation (`wakeAcceptanceStore`, `wakeAcceptanceReconciliation`), tool receipts (`productionAgentTools`), fuse admissions/trips (`wakeFuse`) | Real timestamps on disk; model-visible projections are classified above. |
 | Usage/request/inference/seal ledgers (`turnUsageLedger`, `turnRequestLedger`, `inferenceUsageLedger`, `grokEngineBrokerLedger`, `engineBrokerSealLedger`); broker request timings (`grokBrokerTurnMeter`) | Real accounting and latency measurements. |
 | Pi session event timestamps (`cliSession`), turn traces (`turnTrace`), raw training captures (`rawTrainingCapture`), world trajectories (`worldTrajectory`), causal telemetry (`causalEvents`) | Real diagnostic bookkeeping, unchanged. |
 

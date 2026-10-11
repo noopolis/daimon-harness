@@ -1,4 +1,6 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
+import { readTaskClock } from "./taskClock.js";
 
 import type { AttentionConfig } from "../contracts/attentionContract.js";
 export type { AttentionConfig } from "../contracts/attentionContract.js";
@@ -19,7 +21,10 @@ export function attentionTools(agentId: string, registry: AttentionRegistry): To
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute() {
       const turn = current();
-      const details = { version: "noopolis.daimon.inbox.v1", execution_id: turn.executionId, messages: turn.messages, budget: await turn.budget() };
+      const budget = await turn.budget();
+      const visibleBudget = readTaskClock() !== undefined && budget !== null && typeof budget === "object" && "epoch" in budget && typeof budget.epoch === "string"
+        ? { ...budget, epoch: `budget-${createHash("sha256").update(budget.epoch).digest("hex")}` } : budget;
+      const details = { version: "noopolis.daimon.inbox.v1", execution_id: turn.executionId, messages: turn.messages, budget: visibleBudget };
       return { content: [{ type: "text", text: JSON.stringify(details) }], details };
     }
   }, {
