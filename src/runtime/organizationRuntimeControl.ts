@@ -77,7 +77,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
     const reason = fuse?.tripped();
     return reason === "operator_stop" || reason === "ledger_unavailable" ? reason : undefined;
   };
-  const accept = async (value: unknown): Promise<OrganizationRuntimeWakeAcceptanceResult> => {
+  const accept = async (value: unknown, nativeSchedule = false): Promise<OrganizationRuntimeWakeAcceptanceResult> => {
     let request;
     try { request = parseWakeAcceptanceRequest(value); } catch { return rejected("invalid_request"); }
     if (!tokensEqual(expectedToken, request.token)) return rejected("unauthorized");
@@ -89,7 +89,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
     if (drainedSince !== undefined) return blocked("operator_stop");
     const operation = (async (): Promise<OrganizationRuntimeWakeAcceptanceResult> => {
       try {
-        const accepted = await store!.accept(request);
+        const accepted = await store!.accept(request, nativeSchedule);
         // A stop racing this fsync cannot revoke already durable ownership.
         // It remains accepted for restart instead of being terminalized.
         dispatcher?.notify(request.agent_id, accepted.created);
@@ -166,7 +166,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
             now: () => { const realNow = (options.scheduleOptions?.now ?? Date.now)(); return clock?.at(realNow) ?? realNow; },
             accept: async (occurrence) => {
               if (dispatcher?.busy(occurrence.agentId) || hardReason() || drainedSince !== undefined) return false;
-              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: occurrence.occurredAt } });
+              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: occurrence.occurredAt } }, true);
               return result.state === "accepted";
             }
           });
@@ -178,7 +178,8 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
         throw error;
       }
     },
-    accept,
+    // Do not expose the private provenance argument, even to JavaScript callers.
+    accept: (value) => accept(value),
     async wakeReceipt(token, acceptanceId) {
       if (!tokensEqual(expectedToken, token) || store === undefined) return undefined;
       return await store.status(acceptanceId);

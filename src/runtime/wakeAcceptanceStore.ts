@@ -59,29 +59,29 @@ export class WakeAcceptanceStore {
       throw error;
     }
   }
-  accept(request: OrganizationRuntimeWakeAcceptanceRequest): Promise<{ readonly record: Stored; readonly created: boolean }> {
-    return this.serialize(async () => await this.acceptNow(request));
+  accept(request: OrganizationRuntimeWakeAcceptanceRequest, nativeSchedule = false): Promise<{ readonly record: Stored; readonly created: boolean }> {
+    return this.serialize(async () => await this.acceptNow(request, nativeSchedule));
   }
-  private async acceptNow(request: OrganizationRuntimeWakeAcceptanceRequest): Promise<{ readonly record: Stored; readonly created: boolean }> {
+  private async acceptNow(request: OrganizationRuntimeWakeAcceptanceRequest, nativeSchedule: boolean): Promise<{ readonly record: Stored; readonly created: boolean }> {
     await this.verify();
     const request_digest = wakeAcceptanceDigest(request);
     const target = this.fileFor(request.agent_id, request.delivery_id);
     const existing = await this.readOptional(target);
     if (existing !== undefined) {
-      if (existing.request_digest !== request_digest) throw new WakeAcceptanceConflictError();
+      if (existing.request_digest !== request_digest || existing.native_schedule !== (nativeSchedule ? true : undefined)) throw new WakeAcceptanceConflictError();
       return { record: existing, created: false };
     }
     await this.compactTerminalRecords();
     if ((await this.files()).length >= MAX_WAKE_ACCEPTANCE_RECORDS) throw new WakeInboxFullError();
     const now = new Date().toISOString();
-    const record: Stored = { acceptance_id: randomUUID(), agent_id: request.agent_id, delivery_id: request.delivery_id, request_digest, event: request.event, state: "accepted", accepted_at: now, updated_at: now };
+    const record: Stored = { acceptance_id: randomUUID(), agent_id: request.agent_id, delivery_id: request.delivery_id, request_digest, event: request.event, state: "accepted", accepted_at: now, updated_at: now, ...(nativeSchedule ? { native_schedule: true } : {}) };
     const temporary = path.join(this.root, `.pending-${randomUUID()}`);
     try {
       await this.writeNew(temporary, record);
       try { await link(temporary, target); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         const winner = await this.read(target);
-        if (winner.request_digest !== request_digest) throw new WakeAcceptanceConflictError();
+        if (winner.request_digest !== request_digest || winner.native_schedule !== (nativeSchedule ? true : undefined)) throw new WakeAcceptanceConflictError();
         return { record: winner, created: false };
       }
       await this.directory.sync();

@@ -92,7 +92,7 @@ export function taskClockPreload(value: string | undefined): string | undefined 
   return libraries?.length && libraries.every((library) => /^libfaketime[^/]*\.so[^/]*$/u.test(library.split("/").at(-1)!)) ? value : undefined;
 }
 
-/** Use only for Daimon-owned real timestamps, never external/historical payloads. */
+/** Project real delivery/receipt timestamps, never historical dates inside tool payloads. */
 export function taskClockTimestamp(realTimestamp: string, clock = readTaskClock()): string {
   return clock === undefined ? realTimestamp : new Date(clock.at(Date.parse(realTimestamp))).toISOString();
 }

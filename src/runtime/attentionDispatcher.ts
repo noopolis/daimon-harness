@@ -134,7 +134,7 @@ export class AttentionDispatcher {
     this.active.set(agent.id, { execution_id: agent.attention === undefined ? claimed[0]!.record.delivery_id : executionId, delivery_ids: claimed.map((item) => item.record.delivery_id) });
     let result: OrganizationRuntimeWakeResult;
     try {
-      const messages = taskClockAttentionMessages(claimed.map(({ record }) => ({ acceptance_id: record.acceptance_id, delivery_id: record.delivery_id, ...record.event })));
+      const messages = taskClockAttentionMessages(claimed.map(({ record }) => record));
       if (agent.attention !== undefined) registry.set(agent.id, {
         executionId, messages, budget: () => fuse.snapshot(agent.id, agent.attention),
         disposition: (deliveryId, disposition) => serialize(async () => {

@@ -147,12 +147,23 @@ bounds for due instants, jitter fire targets and pending occurrences; pre-1970
 state is refused. Use a separate acceptance store for a different clock contract;
 existing state is not translated between calendars.
 
+Callers, including Moltnet attention producers and training harnesses replaying
+production wakes, must stamp deliveries in **real time**. Daimon projects each
+envelope as `taskOccurredAt = occurred_at + (originMs - anchorEpochMs)` for the
+wake, attention prompt and `daimon_inbox`, preserving relative offsets and queue
+age. Only native schedules carry private durable provenance for already-task-time
+occurrences; external `kind: "schedule"` deliveries are projected normally.
+Older records without this provenance are treated as real-time deliveries; use a
+fresh store if they contain already-clocked native schedule occurrences.
+Moltnet message timestamps inside tool results stay as stored; Moltnet's clock
+remains **P5 scope**.
+
 | Time surface | Clock / treatment |
 | --- | --- |
 | Final wake prompt, including memory, world, dream and direct-memory example wakes (`piAgentHandle`, `prompts`, `jungianPlayAgent`) | Byte-identical for the same formatted input; no clock prefix or wrapper. |
 | Mneme prompts, memory tools, recall and storage | Mneme receives `clock`; Daimon does not rewrite memory data. |
 | Native schedule occurrence shown in attention prompt / `daimon_inbox` (`organizationRuntimeControl`) | Select occurrences in task time; timestamps and delivery IDs refer to that task-calendar occurrence. |
-| Incoming wake/inbox envelope `occurred_at` | Render task now for non-schedule deliveries; preserve task-calendar schedule occurrences. Stored producer metadata and historical dates inside message text remain unchanged. |
+| Incoming wake/inbox envelope `occurred_at` | Project real delivery instants by the clock offset once; preserve trusted native schedule occurrences. Stored producer metadata and historical dates inside message text remain unchanged. |
 | Replayed `moltnet_send` receipt `at` (`productionAgentTools`) | Convert the stored real timestamp to task time for both model-visible result channels. |
 | `moltnet_read`, external MCP results, world ticks | Historical/external payloads remain verbatim; clock-aware external tools own their current timestamps. |
 | Schedule due times and persisted schedule state | Task-calendar instants when clocked; real timer delays. |
