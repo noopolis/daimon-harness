@@ -1,4 +1,5 @@
 import { GROK_BROKER_MODELS, GROK_BROKER_REASONING_EFFORTS } from "./grokWorkerContract.js";
+import { WAKE_MOMENT_RECORDING_SCHEMA } from "./wakeMomentContract.js";
 
 /** The data-only organization-runtime constants shared by product code and artifacts. */
 export const ORGANIZATION_RUNTIME_VERSION = "noopolis.daimon.organization-runtime.v1" as const;
@@ -34,6 +35,7 @@ export const ORGANIZATION_RUNTIME_CODEX_REASONING_EFFORTS = ["none", "minimal", 
 export const ORGANIZATION_RUNTIME_CODEX_WORKSPACE_NO_NETWORK_POLICY = { mode: "workspace-write", networkAccess: false, webSearch: "disabled" } as const;
 
 const PRODUCTION_TOOL_PROPERTIES = {
+  recording: WAKE_MOMENT_RECORDING_SCHEMA,
   attention: { type: "object", additionalProperties: false, properties: { maxBatchMessages: { type: "integer", minimum: 1, maximum: 32 }, maxBatchBytes: { type: "integer", minimum: 1024, maximum: 12000 }, maxExecutions: { type: "integer", minimum: 1, maximum: 9007199254740991 }, maxTokens: { type: "integer", minimum: 1, maximum: 9007199254740991 } } },
   mcp: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["name", "transport", "args", "env", "tools"], properties: {
     name: { type: "string", minLength: 1, maxLength: ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS }, transport: { enum: ["stdio", "sse", "streamable_http"] },
