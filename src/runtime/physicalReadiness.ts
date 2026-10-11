@@ -34,6 +34,7 @@ export type OrganizationRuntimePathAuthority = Readonly<{
     workspacePath: string;
     runtimeHomePath: string;
     verify(): Promise<void>;
+    verifyRecording?(): Promise<void>;
   }>;
   close(): Promise<void>;
 }>;
@@ -88,7 +89,13 @@ export async function prepareOrganizationRuntimePaths(
       const workspace = workspaces.get(agent.id);
       const home = homes.get(agent.id);
       if (workspace === undefined || home === undefined) throw new Error(`no runtime path authority for ${agent.id}`);
-      return { workspacePath: workspace.real, runtimeHomePath: home.real, verify: () => verify(agent) };
+      return { workspacePath: workspace.real, runtimeHomePath: home.real, verify: () => verify(agent),
+        verifyRecording: async () => {
+          if (closed) throw new Error("runtime path authority is closed");
+          const recording = recordings.get(agent.id);
+          if (recording) await verifyIdentity(recording, "recording.directory", "private");
+        }
+      };
     },
     async close() {
       if (closed) return;
@@ -130,14 +137,14 @@ async function verifyIdentity(directory: Directory, label: string, shape: Direct
   if (await realpath(directory.configured) !== directory.real) throw new Error(`${label} changed after readiness validation`);
 }
 
-export async function assertNoSymlinkComponents(target: string): Promise<void> {
+export async function assertNoSymlinkComponents(target: string, stat: typeof lstat = lstat): Promise<void> {
   const parsed = path.parse(target);
   let current = parsed.root;
   for (const part of path.relative(parsed.root, target).split(path.sep).filter(Boolean)) {
     current = path.join(current, part);
     // macOS exposes /var as a system compatibility symlink to /private/var.
     // It is an OS-root alias, not a caller-controlled component.
-    if ((await lstat(current)).isSymbolicLink() && current !== "/var") throw new Error(`path contains symlink: ${current}`);
+    if ((await stat(current)).isSymbolicLink() && current !== "/var") throw new Error(`path contains symlink: ${current}`);
   }
 }
 
@@ -179,8 +186,8 @@ function assertDirectory(entry: Stats, label: string, shape: DirectoryShape): vo
   assertRuntimeDirectory(entry, label, shape, { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 });
 }
 
-function identity(entry: Stats): Identity { return { dev: entry.dev, ino: entry.ino, uid: entry.uid, mode: entry.mode & 0o7777 }; }
-function sameIdentity(left: Identity, right: Identity): boolean { return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.mode === right.mode; }
+export function identity(entry: Stats): Identity { return { dev: entry.dev, ino: entry.ino, uid: entry.uid, mode: entry.mode & 0o7777 }; }
+export function sameIdentity(left: Identity, right: Identity): boolean { return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.mode === right.mode; }
 function overlaps(left: string, right: string): boolean { return left === right || left.startsWith(`${right}${path.sep}`) || right.startsWith(`${left}${path.sep}`); }
 function noFollow(): number { return (constants as typeof constants & { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0; }
 function directoryFlag(): number { return (constants as typeof constants & { O_DIRECTORY?: number }).O_DIRECTORY ?? 0; }

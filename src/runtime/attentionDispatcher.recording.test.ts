@@ -8,22 +8,22 @@ import type { OrganizationRuntimeAgentConfig, OrganizationRuntimeHost, Organizat
 import { WakeAcceptanceStore } from "./wakeAcceptanceStore.js";
 import { parseWakeAcceptanceRequest } from "./wakeAcceptanceTypes.js";
 import type { WakeFuse } from "./wakeFuse.js";
-import type { WakeMomentRow } from "./wakeMomentRecorder.js";
+import type { WakeMomentOptions, WakeMomentRow } from "./wakeMomentRecorder.js";
 
-async function fixture(t: test.TestContext, attention: boolean, recording: boolean) {
+async function fixture(t: test.TestContext, attention: boolean, recording: boolean, recordingOptionsForTest?: WakeMomentOptions, keepMs = 2592000000) {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "wake-dispatch-recording-"));
   const directory = path.join(root, "recording"), source = path.join(root, "source"), inbox = path.join(root, "inbox");
   await mkdir(inbox, { mode: 0o700 }); await mkdir(source, { mode: 0o700 });
   if (recording) await mkdir(directory, { mode: 0o700 });
   await writeFile(path.join(source, "data"), "state before the turn");
   const agent: OrganizationRuntimeAgentConfig = { id: "agent", name: "Agent", instructions: "Work", workspacePath: "/workspace", runtimeHomePath: "/runtime/home", engine: { kind: "codex" },
-    ...(attention ? { attention: {} } : {}), ...(recording ? { recording: { directory, keepMs: 2592000000, snapshots: [{ id: "state", path: source }] } } : {}) };
+    ...(attention ? { attention: {} } : {}), ...(recording ? { recording: { directory, keepMs, snapshots: [{ id: "state", path: source }] } } : {}) };
   const store = await WakeAcceptanceStore.open(inbox, { processIdentity: async () => ({ pid: 1, process_start: "test", boot_id: "test", pid_namespace_dev: 1, pid_namespace_ino: 1 }), ownerLiveness: async () => true });
   const requests: OrganizationRuntimeWakeRequest[] = [], failures: unknown[] = [];
   let probe: (request: OrganizationRuntimeWakeRequest) => Promise<void> = async () => {}, admitted = false, allow = true;
   let idle!: () => void;
   const done = new Promise<void>((resolve) => { idle = resolve; });
-  const dispatcher = new AttentionDispatcher({ store, agents: [agent], registry: new Map(), token: "token", onIdle: idle,
+  const dispatcher = new AttentionDispatcher({ store, agents: [agent], registry: new Map(), token: "token", onIdle: idle, recordingOptionsForTest,
     fuse: { snapshot: async () => ({ state: "available" }), admit: async () => { admitted = allow; return { state: allow ? "admitted" : "blocked" }; } } as unknown as WakeFuse,
     host: { wake: async (request: OrganizationRuntimeWakeRequest) => {
       requests.push(request);
@@ -91,4 +91,60 @@ test("without recording the original wake is unchanged and no recording director
   assert.deepEqual(f.requests[0], { token: "token", agentId: "agent", event: { version: "noopolis.daimon.wake.v1", id: "first", kind: "message", occurredAt: f.records[0]!.event.occurred_at, text: "Handle work" } });
   await assert.rejects(lstat(f.directory), /ENOENT/);
   assert.deepEqual((await readdir(f.root)).sort(), ["inbox", "source"]);
+});
+
+test("current attempt survives keepMs 1 with a clock advancing during capture", { timeout: 5000 }, async (t) => {
+  let clock = Date.parse("2026-10-09T12:00:00.000Z");
+  const start = clock;
+  const f = await fixture(t, false, true, {
+    now: () => clock,
+    probe: (operation) => { if (operation === "write") clock += 10; }
+  }, 1);
+  f.probe(async () => {
+    assert.ok(clock > start + 1, "capture must actually cross retention's cutoff");
+    const row: WakeMomentRow = JSON.parse(await readFile(path.join(f.directory, "wake-moments.jsonl"), "utf8"));
+    assert.equal(row.started_at, new Date(start).toISOString());
+    assert.equal(row.execution_id, "first"); assert.equal(row.snapshots.length, 1);
+    const snapshot = row.snapshots[0]!;
+    assert.equal(await readFile(path.join(f.directory, "snapshots", "state", snapshot.snapshot, "data"), "utf8"), "state before the turn");
+  });
+  await f.run(); assert.equal(f.requests.length, 1);
+});
+
+for (const late of [false, true]) test(`capture deadline releases the turn and shutdown; late completion=${late}`, { timeout: 3000 }, async (t) => {
+  let release!: () => void, entered!: () => void;
+  const stalled = new Promise<void>((resolve) => { release = resolve; });
+  const waiting = new Promise<void>((resolve) => { entered = resolve; });
+  let captureWrites = 0, stalledAt = 0, enteredRead = false;
+  const deadline = 150;
+  const f = await fixture(t, false, true, { captureDeadlineMs: deadline, probe: async (operation, target) => {
+    if (operation === "write" && target?.includes(".partial/")) captureWrites++;
+    if (operation === "read" && target?.endsWith("/data")) {
+      enteredRead = true; stalledAt = performance.now(); entered(); await stalled;
+    }
+  } });
+  f.probe(async () => {
+    assert.equal(enteredRead, true);
+    const row: WakeMomentRow = JSON.parse(await readFile(path.join(f.directory, "wake-moments.jsonl"), "utf8"));
+    assert.match(row.error!, /capture_deadline_exceeded/); assert.deepEqual(row.snapshots, []);
+    assert.deepEqual(await readdir(path.join(f.directory, "snapshots", "state")), []);
+    assert.ok(performance.now() - stalledAt < 1000, "capture must not hold the turn indefinitely");
+  });
+  const run = f.run();
+  await waiting; await run;
+  assert.equal(f.requests.length, 1); assert.equal(captureWrites, 0);
+  if (late) { release(); await new Promise((resolve) => setTimeout(resolve, 30)); }
+  assert.equal(captureWrites, 0, "abandoned capture cannot resume writing alongside cognition");
+  await f.dispatcher.stop();
+});
+
+test("shutdown during a never-resolving capture settles at its deadline", { timeout: 3000 }, async (t) => {
+  let entered!: () => void;
+  const waiting = new Promise<void>((resolve) => { entered = resolve; });
+  const f = await fixture(t, false, true, { captureDeadlineMs: 150, probe: async (operation, target) => {
+    if (operation === "read" && target?.endsWith("/data")) { entered(); await new Promise(() => {}); }
+  } });
+  const run = f.run(); await waiting;
+  const start = performance.now(); await f.dispatcher.stop(); await run;
+  assert.ok(performance.now() - start < 1000);
 });

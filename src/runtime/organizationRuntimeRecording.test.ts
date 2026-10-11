@@ -54,7 +54,8 @@ test("both schemas and the capability manifest expose the closed recording shape
   }
   assert.deepEqual(RUNTIME_CONTRACT_MANIFEST.wakeMoments, {
     version: "noopolis.daimon.wake-moment.v1", rowsFile: "wake-moments.jsonl", snapshotsDirectory: "snapshots",
-    maxSnapshotRoots: 16, maxSnapshotEntries: 200_000, maxRowBytes: 4_194_304, configField: "agents[].recording"
+    completionSuffix: ".complete", maxSnapshotRoots: 16, maxSnapshotEntries: 200_000, maxRowBytes: 4_194_304,
+    maxManifestBytes: 134_217_728, captureDeadlineMs: 60_000, finalizationDeadlineMs: 1_000, configField: "agents[].recording"
   });
   assert.ok(RUNTIME_CONTRACT_MANIFEST.consumedConfigFields.includes("agents[].recording"));
 });

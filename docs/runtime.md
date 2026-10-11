@@ -131,6 +131,7 @@ its digest participates in the image capability receipt. The store contains:
   snapshots/<root id>/
     <compact started_at>-<execution id>/
     <compact started_at>-<execution id>.manifest.json
+    <compact started_at>-<execution id>.complete
 ```
 
 `started_at` is the ISO millisecond UTC time capture begins. Rows identify the
@@ -140,7 +141,10 @@ occurrence time, plus successful roots' `id`, `snapshot`, `files`, `copied`,
 matches active execution reporting: the first delivery id without attention,
 the batch execution id with attention. Every recovery attempt appends another
 row; consumers take the last attempt whose snapshot completed before the turn.
-Legacy synchronous `/v1/wake` calls bypass this durable dispatcher.
+An agent with `recording` accepts only durable inbox wakes (`POST /v2/wakes`).
+Synchronous `/v1/wake` and direct legacy host calls return the existing
+`rejected` result with code `durable_inbox_required`, before queuing any turn.
+Agents without recording retain their existing admission behavior.
 
 Filesystem encoding preserves ordinary identifiers. The reserved root ids `.`
 and `..` use `%2E` and `%2E%2E` directory names. Execution ids outside
@@ -156,29 +160,64 @@ regular files are copied. Directories are recreated privately (`0700`), with
 original modes in the manifest for replay. Symlinks are recreated, never read
 through; sockets, FIFOs and devices are skipped and counted. A root exceeding
 200,000 entries (including directories, links and skipped entries) fails that
-capture. Each JSONL line is capped at 4 MiB, including its newline; retention
+capture. A manifest is limited to 128 MiB of serialized UTF-8, shared by
+reader and writer; an oversized root fails with `manifest_size_limit` before
+either directory or manifest publication. Each JSONL line is capped at 4 MiB, including its newline; retention
 reads enforce the same bound. Errors contain bounded reason codes, never source
 paths, file contents or arbitrary exception text.
 
 A root builds in `<snapshot>.partial`: copied files and directories are synced,
 the directory is renamed and synced, then its manifest is written by synced
 temporary file and rename. A snapshot is complete only with both directory and
-manifest. The row follows in one append write plus fsync (and a directory fsync
+manifest and its zero-byte `.complete` ownership marker, synced last. The row follows in one append write plus fsync (and a directory fsync
 on first creation). Root failure removes the partial, omits that root from the
 row, records an error, and lets the turn run. Row or retention failure is logged
 and also lets the turn run. A torn final row is delimited before a later append;
 readers must ignore invalid lines.
 
+Capture has a fixed 60-second deadline (`wakeMoments.captureDeadlineMs`), shared
+across all roots and initial store validation. A timer and cancellation checks
+between filesystem operations stop abandoned capture work from issuing further
+writes. On expiry, unfinished roots are omitted and the row reports
+`capture_deadline_exceeded`. Cleanup, the row attempt, and retention have a
+separate fixed one-second finalization budget (`finalizationDeadlineMs`); a
+stalled cleanup does not prevent attempting the error row. The dispatcher and
+shutdown never await the abandoned capture promise. Healthy storage records the
+error before the turn; if even row I/O stalls or the store is untrustworthy,
+Daimon logs a bounded reason and runs the turn. Node cannot cancel a syscall
+already in flight; it can still finish, and late opens are closed. Recursive
+cleanup checks cancellation between individual filesystem operations. Timers
+also depend on event-loop scheduling; these are not real-time OS deadlines.
+Neither deadline is caller-configurable.
+
+The recording root stays pinned to its validated `dev`, `ino`, `uid`, and mode.
+Existing path-authority checks reverify its identity and absence of symlink
+components immediately before capture, publication, and deletion (and before
+writes). Startup authority is checked again when available. A mismatch stops
+recording for that wake; an error row is attempted only through a still-trusted
+store, otherwise the failure is logged. Node has no `openat`: as with spill
+publication, a residual lstat-then-act race remains between verification and a
+path-based syscall. This is detection, not race-free descriptor-relative I/O.
+
 After append, retention removes rows and complete snapshots older than
-`now - keepMs`, always retaining the newest complete snapshot for every root,
-even one removed from the current config. Rows are rewritten by synced temporary
-file and rename only when pruning occurs. Foreign files and names without a
-matching manifest are untouched. Interrupted partials, orphan directories and
-temporary files are left for operator inspection; a crash can also leave rows
-referencing an expired snapshot during pruning. A crash after snapshot completion
-but before row append can leave an unreferenced complete snapshot. A crash after
-row append but before host invocation can leave a row for a turn that never ran.
-Recording is evidence of the pre-turn capture, not proof of execution.
+`now - keepMs`, always retaining the newest complete snapshot for every root
+(including removed roots), **plus the just-appended attempt and every snapshot
+it references**, independently of `keepMs` or clock movement. Snapshot ages come
+from their names. The completion marker proves writer ownership without reading
+historical manifests; only the newest link-base manifest per root is read during
+capture. Directory-name enumeration still scales with snapshot count. Ledger
+compaction reads only its bounded first line on ordinary wakes, scanning fully
+when that row is expired or once every 64 wakes (to handle a foreign prefix or
+clock rollback); it renames a synced replacement only when rows were pruned.
+Foreign files and unmarked directory/manifest pairs are untouched. The marker
+is additive on-disk metadata: pre-marker pairs are preserved for inspection,
+not reused or pruned automatically. Interrupted partials, orphan directories,
+and temporary files can remain when best-effort cleanup cannot finish; a crash
+can also leave rows referencing an expired snapshot during pruning. A crash
+after snapshot completion but before row append can leave an unreferenced
+complete snapshot. A crash after row append but before host invocation can
+leave a row for a turn that never ran. Recording is evidence of the pre-turn
+capture, not proof of execution.
 
 The snapshot is a point-in-time copy taken while this agent is idle. Files are
 copied without locks: concurrent writers to a **shared** root, including another

@@ -886,14 +886,37 @@ root ids are encoded; arbitrary delivery ids are hashed only in filenames.
 
 `wakeMomentRecorder.ts` writes one bounded (4 MiB) fsynced JSONL row per attempt,
 with the active execution id, delivery metadata, successful roots and bounded
-reason-code errors. No config means no recording I/O. A snapshot or row failure
+reason-code errors. Recording agents accept only durable inbox dispatch; all
+synchronous/legacy host wakes return existing `rejected/durable_inbox_required`.
+No config means no recording I/O. A snapshot or row failure
 must never fail the wake. Retention prunes expired rows and recognized complete
-snapshots but always keeps the newest base per root, including removed roots;
-it never deletes foreign names or manifests. Keep the data-only `wakeMoments`
+snapshots but always keeps the newest base per root, including removed roots,
+and explicitly protects the just-appended row and all its snapshots. Age comes
+from snapshot names; a synced zero-byte `.complete` marker records ownership so
+retention never parses manifests. Only the newest link-base manifest is read
+per root. Unmarked pairs are preserved for inspection, never reused or pruned.
+Rows compaction checks the bounded first line, scans only when it is expired
+or every 64 wakes, and renames only when pruning occurred. Name enumeration
+still scales with snapshot count; historical file-content reads do not. Keep the data-only `wakeMoments`
 manifest capability and emitted digest in sync with these bounds.
 
+The shared manifest bound is 128 MiB of serialized UTF-8, enforced before any
+publication. Capture is bounded by 60 seconds across roots; an abort flag checked
+between I/O calls and a timer abandon stalled work with `capture_deadline_exceeded`.
+A separately bounded one-second finalizer attempts cleanup, error row and retention;
+a stalled cleanup cannot block the row. No deadline is caller-configurable.
+Shutdown never awaits the abandoned capture. Node cannot cancel an in-flight
+syscall, and event-loop stalls can delay timers; late completions issue no further
+capture writes. Recursive cleanup checks cancellation between individual calls.
+
+Keep the root descriptor and reverify dev/ino/uid/mode and no symlink components
+with the existing path-authority helpers before capture, publication, and every
+deletion. A changed root aborts recording, never the turn; log if an error row
+cannot be written through the still-trusted store. Node has no openat: like spill
+publication, this retains a residual lstat-then-act race, not a race-free guarantee.
+
 Snapshots publish a synced partial directory by rename, then a synced manifest
-by rename, then the row. A crash between them can leave partial/orphan captures,
+by rename, then a synced `.complete` marker, then the row. A crash between them can leave partial/orphan captures,
 or a row without an invoked turn; recording does not attest execution. Retention
 can leave old rows referencing pruned snapshots if interrupted; abandoned partials
 and temporary files remain for operator inspection. The snapshot is a point-in-time
