@@ -8,9 +8,11 @@ import { STALE_QUEUED_DELIVERY_MS } from "./wakeAcceptanceRetention.js";
 import { WakeFuse } from "./wakeFuse.js";
 import { ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS, ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES } from "../contracts/organizationRuntimeContract.js";
 import { grokDaimonToolName } from "../contracts/grokWorkerContract.js";
+import { verifyHostRecordingStore, wakeFromDurableInbox } from "./organizationRuntimeAdmission.js";
+import { recordWakeMoment, type WakeMomentOptions } from "./wakeMomentRecorder.js";
 
 type Claimed = { record: StoredWakeAcceptanceRecord; claim: WakeExecutionClaim; done: boolean };
-type Options = Readonly<{ store: WakeAcceptanceStore; host: OrganizationRuntimeHost; fuse: WakeFuse; agents: readonly OrganizationRuntimeAgentConfig[]; registry: AttentionRegistry; token: string | undefined; onIdle(agentId: string): void }>;
+type Options = Readonly<{ store: WakeAcceptanceStore; host: OrganizationRuntimeHost; fuse: WakeFuse; agents: readonly OrganizationRuntimeAgentConfig[]; registry: AttentionRegistry; token: string | undefined; onIdle(agentId: string): void; recordingOptionsForTest?: WakeMomentOptions }>;
 
 /** Durable deliveries wait here; only a selected execution reserves a budget slot. */
 export class AttentionDispatcher {
@@ -148,7 +150,10 @@ export class AttentionDispatcher {
     let result: OrganizationRuntimeWakeResult;
     try {
       const first = claimed[0]!.record;
-      result = await host.wake({ token, agentId: agent.id, event: {
+      if (agent.recording) {
+        await recordWakeMoment(agent, agent.attention === undefined ? first.delivery_id : executionId, claimed.map(({ record }) => record), { ...this.options.recordingOptionsForTest, verifyStore: () => verifyHostRecordingStore(host, agent.id) });
+      }
+      result = await wakeFromDurableInbox(host, { token, agentId: agent.id, event: {
         version: "noopolis.daimon.wake.v1", id: agent.attention === undefined ? first.delivery_id : executionId, kind: first.event.kind,
         occurredAt: first.event.occurred_at,
         text: agent.attention === undefined ? first.event.text : inboxPrompt(messages, agent.engine.kind, agent.attention.maxBatchBytes)

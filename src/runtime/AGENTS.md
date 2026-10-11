@@ -872,3 +872,70 @@ across a transition — it describes the transition that produced the current st
 and a reclaimed delivery is claimed again later. Widening the enum rotates the
 contract manifest digest, so Spawnfile must re-vendor
 `contract-manifest.json`/`.sha256` and its pinned constant.
+
+
+`recording` is an optional data-only per-agent config in both versions. The
+caller provisions a private `0700` store outside all runtime/snapshot roots;
+sources may be shared or worker-owned, and missing sources are empty captures.
+`wakeMomentSnapshot.ts` captures immediately before `attentionDispatcher` invokes
+`host.wake`, after claim/admission, and hard-links unchanged files based on SOURCE
+bigint `(dev, ino, size, mtimeNs, ctimeNs, mode)`. Never drop ctime: restoring mtime
+must not hide an edit. Symlinks are recreated without following; special entries
+are skipped and counted; roots over 200,000 entries fail the capture. Dot-only
+root ids are encoded; arbitrary delivery ids are hashed only in filenames.
+Directory opens compare fstat dev/ino with the preceding lstat; Linux anchors
+through `/proc/self/fd`, and all platforms recheck directory identity around
+entry lookup, before file reads and after enumeration. A swapped directory
+fails that root. File opens use O_NOFOLLOW and compare fstat with entry lstat.
+
+`wakeMomentRecorder.ts` writes one bounded (4 MiB) fsynced JSONL row per attempt,
+with the active execution id, delivery metadata, successful roots and bounded
+reason-code errors. Recording agents accept only durable inbox dispatch; all
+synchronous/legacy host wakes return existing `rejected/durable_inbox_required`.
+No config means no recording I/O. A snapshot or row failure
+must never fail the wake. Retention prunes expired rows and recognized complete
+snapshots but always keeps the newest base per root, including removed roots,
+and explicitly protects the just-appended row and all its snapshots. Age comes
+from snapshot names; a synced zero-byte `.complete` marker records ownership so
+retention never parses manifests. Its regular-file, size-zero and single-link
+eligibility is checked before either base selection or retention protection;
+ineligible candidates are neither protected nor deleted. Only the newest link-base manifest is read
+per root. Unmarked pairs are preserved for inspection, never reused or pruned.
+Rows compaction checks the bounded first line, scans only when it is expired
+or every 64 wakes, and renames only when pruning occurred. Each root has a durable
+1 KiB `latest` cache naming its newest and oldest non-newest retained snapshots.
+Validate the pointer and newest candidate on use; enumerate only on missing/invalid
+cache or when the tracked oldest name can expire. Publish the cache (exclusive
+tmp, fsync, rename, directory fsync) before the completion marker so interrupted
+publication forces recovery rather than leaving a valid stale pointer. The
+private store has one snapshot publisher; expiry/recovery scans still scale with
+history, ordinary wakes do not enumerate it. Keep the data-only `wakeMoments`
+manifest capability and emitted digest in sync with these bounds.
+
+The shared manifest bound is 128 MiB of serialized UTF-8, enforced before any
+publication. Capture is bounded by 60 seconds across roots; an abort flag checked
+between I/O calls and a timer abandon stalled work with `capture_deadline_exceeded`.
+A separately bounded one-second finalizer attempts cleanup, error row and retention;
+a stalled cleanup cannot block the row. No deadline is caller-configurable.
+Shutdown never awaits the abandoned capture. Node cannot cancel an in-flight
+syscall, and event-loop stalls can delay timers; late completions issue no further
+capture writes. Recursive cleanup checks cancellation between individual calls.
+
+Keep the root descriptor and reverify dev/ino/uid/mode and no symlink components
+with the existing path-authority helpers before capture, publication, and every
+deletion. A changed root aborts recording, never the turn; log if an error row
+cannot be written through the still-trusted store. Node has no openat: like spill
+publication, this retains a residual lstat-then-act race, not a race-free guarantee.
+
+Cleanup claims paths only after exclusive creation, including partials, metadata
+and temporary files. Name collision checks cover every artifact; directory and
+manifest publication reserve their destinations exclusively before rename.
+Snapshots publish a synced partial directory by rename, then a synced manifest
+by rename, then the latest cache, a synced `.complete` marker, and the row. A crash between them can leave partial/orphan captures,
+or a row without an invoked turn; recording does not attest execution. Retention
+can leave old rows referencing pruned snapshots if interrupted; abandoned partials
+and temporary files remain for operator inspection. The snapshot is a point-in-time
+copy while this agent is idle, **without locks**: concurrent writers to shared
+roots (another agent or long-lived MCP server) can tear files mid-copy or mix
+states across files. Detected mutation fails the root, but it is not an atomic
+filesystem snapshot. Consumers must never mutate hard-linked snapshot files.

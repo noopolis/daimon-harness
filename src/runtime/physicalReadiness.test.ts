@@ -111,3 +111,27 @@ test("the engine kind decides the runtime home shape on a real filesystem", asyn
     await assert.rejects(prepareOrganizationRuntimePaths([grok]), /must have mode 0710 for a brokered Grok agent/u);
   });
 });
+
+test("recording requires a caller-created private real root, but sources can be missing or shared", async () => {
+  await withRoots(async (root) => {
+    const workspace = path.join(root, "workspace"), home = path.join(root, "home"), directory = path.join(root, "recording"), source = path.join(root, "source");
+    await mkdir(workspace, { mode: 0o700 }); await mkdir(home, { mode: 0o700 });
+    const configured = { ...agent(workspace, home), recording: { directory, keepMs: 1000, snapshots: [{ id: "state", path: source }] } };
+    await assert.rejects(prepareOrganizationRuntimePaths([configured]), /ENOENT/);
+    await assert.rejects(lstat(directory), /ENOENT/, "caller roots are never created by readiness");
+    await mkdir(directory, { mode: 0o700 });
+    const missing = await prepareOrganizationRuntimePaths([configured]); await missing.close();
+    await mkdir(source, { mode: 0o777 }); await chmod(source, 0o777);
+    const shared = await prepareOrganizationRuntimePaths([configured]); await shared.close();
+    // An OS-owned readable source is valid: it need not belong to the runtime uid.
+    const foreignOwner = await prepareOrganizationRuntimePaths([{ ...configured, recording: { ...configured.recording, snapshots: [{ id: "shared", path: "/usr/share" }] } }]);
+    await foreignOwner.close();
+    await chmod(directory, 0o755);
+    await assert.rejects(prepareOrganizationRuntimePaths([configured]), /recording.directory must have mode 0700/);
+    await chmod(directory, 0o700);
+    await symlink(directory, path.join(root, "linked"));
+    await assert.rejects(prepareOrganizationRuntimePaths([{ ...configured, recording: { ...configured.recording, directory: path.join(root, "linked") } }]), /symlink/);
+    await assert.rejects(prepareOrganizationRuntimePaths([{ ...configured, recording: { ...configured.recording, snapshots: [{ id: "bad", path: directory }] } }]), /overlap/);
+    assert.throws(() => assertRuntimeDirectory(entry(0o700, 2200), "recording.directory", "private", runtime), /owned by the runtime user/);
+  });
+});

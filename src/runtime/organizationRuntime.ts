@@ -1,4 +1,6 @@
 import type { AttentionConfig } from "../contracts/attentionContract.js";
+import type { WakeMomentRecording } from "../contracts/wakeMomentContract.js";
+export type { WakeMomentRecording } from "../contracts/wakeMomentContract.js";
 import {
   ORGANIZATION_RUNTIME_CODEX_REASONING_EFFORTS,
   ORGANIZATION_RUNTIME_CODEX_WORKSPACE_NO_NETWORK_POLICY,
@@ -51,7 +53,7 @@ export type OrganizationRuntimeSchedule =
   | Readonly<{ kind: "disabled" }>
   | Readonly<{ kind: "every"; interval_ms: number; prompt: string; jitter_seconds?: number }>
   | Readonly<{ kind: "cron"; cron: string; timezone: string; prompt: string; jitter_seconds?: number }>;
-export type OrganizationRuntimeAgentConfig = Readonly<{ id: string; name: string; instructions: string; workspacePath: string; runtimeHomePath: string; engine: OrganizationRuntimeEngineIntent; attention?: AttentionConfig; schedule?: OrganizationRuntimeSchedule; mcp?: readonly OrganizationRuntimeMcpServer[]; moltnet?: OrganizationRuntimeMoltnet; memory?: OrganizationRuntimeMemory }>;
+export type OrganizationRuntimeAgentConfig = Readonly<{ id: string; name: string; instructions: string; workspacePath: string; runtimeHomePath: string; engine: OrganizationRuntimeEngineIntent; attention?: AttentionConfig; recording?: WakeMomentRecording; schedule?: OrganizationRuntimeSchedule; mcp?: readonly OrganizationRuntimeMcpServer[]; moltnet?: OrganizationRuntimeMoltnet; memory?: OrganizationRuntimeMemory }>;
 export type OrganizationRuntimeHostConfig = Readonly<{ bindHost: string; port: number; /** Variable name only; never secret configuration data. */ controlTokenEnv: string }>;
 export type OrganizationRuntimeConfig = Readonly<{ version: typeof ORGANIZATION_RUNTIME_VERSION | typeof ORGANIZATION_RUNTIME_V2_VERSION; host: OrganizationRuntimeHostConfig; agents: readonly OrganizationRuntimeAgentConfig[] }>;
 export type OrganizationRuntimeLifecycleState = "starting" | "running" | "stopping" | "stopped";

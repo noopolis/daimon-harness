@@ -1,9 +1,8 @@
 import type { AttentionRegistry } from "./attention.js";
+import { consumeDurableAdmission, registerRecordingVerifier } from "./organizationRuntimeAdmission.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-
 import type { AgentHandle, AgentStatus, WakeEvent } from "../core/types.js";
 import { sanitizeWakeCompletionText } from "./wakeAcceptanceTypes.js";
-
 import { startOrganizationRuntimeEngine } from "./engineDispatcher.js";
 import type { OrganizationRuntimePathAuthority } from "./physicalReadiness.js";
 import {
@@ -26,22 +25,18 @@ import {
   type OrganizationRuntimeWakeRequest,
   type OrganizationRuntimeWakeResult
 } from "./organizationRuntime.js";
-
 type OrganizationRuntimeEngineFactory = (
   agent: OrganizationRuntimeAgentConfig,
   paths?: ReturnType<OrganizationRuntimePathAuthority["forAgent"]>
 ) => Promise<AgentHandle>;
-
 type HostReadiness = OrganizationRuntimeHostReadiness;
 type ProductionHostOptions = Readonly<{ sharedProtectedPaths?: readonly string[] }>;
-
 type WakeJob = {
   readonly request: OrganizationRuntimeWakeRequest;
   readonly resolve: (result: OrganizationRuntimeWakeResult) => void;
   settled: boolean;
   aborting: boolean;
 };
-
 type HostedAgent = {
   readonly config: OrganizationRuntimeAgentConfig;
   handle?: AgentHandle;
@@ -51,14 +46,12 @@ type HostedAgent = {
   pending: WakeJob[];
   stopped: boolean;
 };
-
 /** Creates the public host with Daimon's closed production engine dispatcher. */
 export function createOrganizationRuntimeHost(config: unknown, options: ProductionHostOptions = {}): OrganizationRuntimeHost {
   const parsed = parseOrganizationRuntimeConfig(config);
   if (parsed.agents.some((agent) => agent.attention !== undefined)) throw new Error("attention requires createOrganizationRuntimeControlHost and POST /v2/wakes for durable inbox ownership");
   return createOrganizationRuntimeHostWithAttention(parsed, options, new Map());
 }
-
 /** @internal Control-owned attention registry, never a caller-supplied config hook. */
 export function createOrganizationRuntimeHostWithAttention(config: unknown, options: ProductionHostOptions, attention: AttentionRegistry): OrganizationRuntimeHost {
   const parsed = parseOrganizationRuntimeConfig(config);
@@ -240,6 +233,7 @@ function createHost(
   };
 
   const wake = async (request: OrganizationRuntimeWakeRequest): Promise<OrganizationRuntimeWakeResult> => {
+    const durable = consumeDurableAdmission(request);
     let parsed: OrganizationRuntimeWakeRequest;
     try {
       parsed = parseOrganizationRuntimeWakeRequest(request);
@@ -257,6 +251,7 @@ function createHost(
       addActivity(parsed.agentId, "wake_rejected", parsed.event.id);
       return rejected(parsed, "unknown_agent");
     }
+    if (agent.config.recording && !durable) return rejected(parsed, "durable_inbox_required");
     if (agent.pending.length >= maxPendingWakes) {
       addActivity(parsed.agentId, "wake_rejected", parsed.event.id);
       return rejected(parsed, "queue_full");
@@ -339,7 +334,9 @@ function createHost(
     return attempt;
   };
 
-  return { start, wake, health, activity: activityPage, stop };
+  return registerRecordingVerifier({ start, wake, health, activity: activityPage, stop }, async (id) => {
+    await readiness?.paths.forAgent(agents.get(id)!.config).verifyRecording?.();
+  });
 }
 
 function toCoreWake(request: OrganizationRuntimeWakeRequest): WakeEvent {
@@ -390,7 +387,7 @@ export function engineFailureDetail(error: unknown): string | undefined {
   return Buffer.from(trimmed, "utf8").subarray(0, ENGINE_FAILURE_DETAIL_MAX_BYTES).toString("utf8");
 }
 
-function rejected(request: OrganizationRuntimeWakeRequest, code: "unauthorized" | "unknown_agent" | "queue_full"): OrganizationRuntimeWakeResult {
+function rejected(request: OrganizationRuntimeWakeRequest, code: "unauthorized" | "unknown_agent" | "queue_full" | "durable_inbox_required"): OrganizationRuntimeWakeResult {
   return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: request.agentId, wakeId: request.event.id, code };
 }
 

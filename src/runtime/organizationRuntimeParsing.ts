@@ -1,5 +1,6 @@
 import { GROK_BROKER_MODELS, GROK_BROKER_REASONING_EFFORTS } from "../contracts/grokWorkerContract.js";
 import { parseAttention } from "./attention.js";
+import { isolateRecording, parseRecording } from "./organizationRuntimeRecording.js";
 import {
   ORGANIZATION_RUNTIME_CODEX_REASONING_EFFORTS,
   ORGANIZATION_RUNTIME_CODEX_WORKSPACE_NO_NETWORK_POLICY,
@@ -49,6 +50,7 @@ export function parseOrganizationRuntimeConfig(value: unknown): OrganizationRunt
   });
   isolated(agents);
   isolatedMemory(agents);
+  isolateRecording(agents);
   return { version: version as OrganizationRuntimeConfig["version"], host, agents };
 }
 
@@ -73,10 +75,11 @@ export const isOrganizationRuntimeConfig = validateOrganizationRuntimeConfig;
 
 function parseAgent(value: unknown, label: string, v2: boolean): OrganizationRuntimeAgentConfig {
   const agent = object(value, label);
-  exactOptional(agent, v2 ? ["id", "name", "instructions", "workspacePath", "runtimeHomePath", "engine", "schedule"] : ["id", "name", "instructions", "workspacePath", "runtimeHomePath", "engine"], ["mcp", "moltnet", "memory", "attention"], label);
+  exactOptional(agent, v2 ? ["id", "name", "instructions", "workspacePath", "runtimeHomePath", "engine", "schedule"] : ["id", "name", "instructions", "workspacePath", "runtimeHomePath", "engine"], ["mcp", "moltnet", "memory", "attention", "recording"], label);
   return {
     id: nonEmpty(agent.id, `${label}.id`), name: nonEmpty(agent.name, `${label}.name`), instructions: nonEmpty(agent.instructions, `${label}.instructions`, ORGANIZATION_RUNTIME_MAX_INSTRUCTIONS_CODEPOINTS), workspacePath: absolute(agent.workspacePath, `${label}.workspacePath`), runtimeHomePath: absolute(agent.runtimeHomePath, `${label}.runtimeHomePath`), engine: engine(agent.engine, `${label}.engine`),
     ...(agent.attention === undefined ? {} : { attention: parseAttention(agent.attention) }),
+    ...(agent.recording === undefined ? {} : { recording: parseRecording(agent.recording) }),
     ...(v2 ? { schedule: schedule(agent.schedule, `${label}.schedule`) } : {}),
     ...(agent.mcp === undefined ? {} : { mcp: mcpServers(agent.mcp, `${label}.mcp`) }),
     ...(agent.moltnet === undefined ? {} : { moltnet: moltnet(agent.moltnet, `${label}.moltnet`) }),

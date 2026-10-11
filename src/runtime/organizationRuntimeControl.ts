@@ -125,11 +125,11 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
   return {
     wake: async (request) => {
       try { request = parseOrganizationRuntimeWakeRequest(request); } catch { return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: "", wakeId: "", code: "invalid_request" }; }
-      // Inbox attention requires durable ownership; synchronous v1 cannot
-      // provide a receipt or leave deferred messages pending.
+      // Attention and recording require durable ownership and dispatcher admission.
       if (!tokensEqual(expectedToken, request.token)) return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: request.agentId, wakeId: request.event.id, code: "unauthorized" };
       if (!knownAgents.has(request.agentId)) return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: request.agentId, wakeId: request.event.id, code: "unknown_agent" };
-      if (config.agents.find((agent) => agent.id === request.agentId)?.attention !== undefined) return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: request.agentId, wakeId: request.event.id, code: "durable_inbox_required" };
+      const agent = config.agents.find((candidate) => candidate.id === request.agentId)!;
+      if (agent.attention !== undefined || agent.recording !== undefined) return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: request.agentId, wakeId: request.event.id, code: "durable_inbox_required" };
       // v1 has no `blocked` member on its wire; a drain answers it exactly as the latched stop does.
       if (hardReason() || drainedSince !== undefined) return { version: "noopolis.daimon.wake-result.v1", status: "stopped", agentId: request.agentId, wakeId: request.event.id, code: "host_stopping" };
       v1Turns += 1;
