@@ -1,9 +1,10 @@
 import { constants, type Stats } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
+import { access, lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { GROK_ENGINE_BROKER } from "../contracts/runtimeContractManifest.js";
 import type { OrganizationRuntimeAgentConfig } from "./organizationRuntime.js";
+import { pathsOverlap } from "./organizationRuntimeRecording.js";
 
 type Identity = Readonly<{ dev: number; ino: number; uid: number; mode: number }>;
 /**
@@ -47,12 +48,14 @@ export async function prepareOrganizationRuntimePaths(
 ): Promise<OrganizationRuntimePathAuthority> {
   const workspaces = new Map<string, Directory>();
   const homes = new Map<string, Directory>();
+  const recordings = new Map<string, Directory>();
   try {
     for (const agent of agents) {
       workspaces.set(agent.id, await verifyDirectory(agent.workspacePath, "workspacePath", "safe"));
       homes.set(agent.id, await verifyDirectory(agent.runtimeHomePath, "runtimeHomePath", runtimeHomeShape(agent)));
+      if (agent.recording) recordings.set(agent.id, await verifyDirectory(agent.recording.directory, "recording.directory", "private"));
     }
-    const roots = [...workspaces.values(), ...homes.values()];
+    const roots = [...workspaces.values(), ...homes.values(), ...recordings.values()];
     for (let left = 0; left < roots.length; left += 1) for (let right = left + 1; right < roots.length; right += 1) {
       const first = roots[left]!;
       const second = roots[right]!;
@@ -60,8 +63,12 @@ export async function prepareOrganizationRuntimePaths(
         throw new Error(`physical runtime paths overlap: ${first.configured} and ${second.configured}`);
       }
     }
+    for (const agent of agents) for (const source of agent.recording?.snapshots ?? []) {
+      const real = await readableSnapshotDirectory(source.path);
+      if (real !== undefined && [...recordings.values()].some((store) => pathsOverlap(store.real, real))) throw new Error("physical recording and snapshot paths overlap");
+    }
   } catch (error) {
-    const closeError = await closeAll([...workspaces.values(), ...homes.values()]);
+    const closeError = await closeAll([...workspaces.values(), ...homes.values(), ...recordings.values()]);
     if (closeError !== undefined) throw new AggregateError([error, closeError], "runtime path validation cleanup failed");
     throw error;
   }
@@ -85,7 +92,7 @@ export async function prepareOrganizationRuntimePaths(
     },
     async close() {
       if (closed) return;
-      const failure = await closeAll([...workspaces.values(), ...homes.values()]);
+      const failure = await closeAll([...workspaces.values(), ...homes.values(), ...recordings.values()]);
       if (failure !== undefined) throw failure;
       closed = true;
     }
@@ -123,7 +130,7 @@ async function verifyIdentity(directory: Directory, label: string, shape: Direct
   if (await realpath(directory.configured) !== directory.real) throw new Error(`${label} changed after readiness validation`);
 }
 
-async function assertNoSymlinkComponents(target: string): Promise<void> {
+export async function assertNoSymlinkComponents(target: string): Promise<void> {
   const parsed = path.parse(target);
   let current = parsed.root;
   for (const part of path.relative(parsed.root, target).split(path.sep).filter(Boolean)) {
@@ -131,6 +138,20 @@ async function assertNoSymlinkComponents(target: string): Promise<void> {
     // macOS exposes /var as a system compatibility symlink to /private/var.
     // It is an OS-root alias, not a caller-controlled component.
     if ((await lstat(current)).isSymbolicLink() && current !== "/var") throw new Error(`path contains symlink: ${current}`);
+  }
+}
+
+/** Shared sources have no owner/privacy requirement. Missing sources are empty captures. */
+async function readableSnapshotDirectory(target: string): Promise<string | undefined> {
+  try {
+    await assertNoSymlinkComponents(target);
+    const entry = await lstat(target);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error("recording snapshot must be a readable real directory");
+    await access(target, constants.R_OK | constants.X_OK);
+    return await realpath(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
   }
 }
 

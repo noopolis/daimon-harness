@@ -872,3 +872,32 @@ across a transition — it describes the transition that produced the current st
 and a reclaimed delivery is claimed again later. Widening the enum rotates the
 contract manifest digest, so Spawnfile must re-vendor
 `contract-manifest.json`/`.sha256` and its pinned constant.
+
+
+`recording` is an optional data-only per-agent config in both versions. The
+caller provisions a private `0700` store outside all runtime/snapshot roots;
+sources may be shared or worker-owned, and missing sources are empty captures.
+`wakeMomentSnapshot.ts` captures immediately before `attentionDispatcher` invokes
+`host.wake`, after claim/admission, and hard-links unchanged files based on SOURCE
+bigint `(dev, ino, size, mtimeNs, ctimeNs, mode)`. Never drop ctime: restoring mtime
+must not hide an edit. Symlinks are recreated without following; special entries
+are skipped and counted; roots over 200,000 entries fail the capture. Dot-only
+root ids are encoded; arbitrary delivery ids are hashed only in filenames.
+
+`wakeMomentRecorder.ts` writes one bounded (4 MiB) fsynced JSONL row per attempt,
+with the active execution id, delivery metadata, successful roots and bounded
+reason-code errors. No config means no recording I/O. A snapshot or row failure
+must never fail the wake. Retention prunes expired rows and recognized complete
+snapshots but always keeps the newest base per root, including removed roots;
+it never deletes foreign names or manifests. Keep the data-only `wakeMoments`
+manifest capability and emitted digest in sync with these bounds.
+
+Snapshots publish a synced partial directory by rename, then a synced manifest
+by rename, then the row. A crash between them can leave partial/orphan captures,
+or a row without an invoked turn; recording does not attest execution. Retention
+can leave old rows referencing pruned snapshots if interrupted; abandoned partials
+and temporary files remain for operator inspection. The snapshot is a point-in-time
+copy while this agent is idle, **without locks**: concurrent writers to shared
+roots (another agent or long-lived MCP server) can tear files mid-copy or mix
+states across files. Detected mutation fails the root, but it is not an atomic
+filesystem snapshot. Consumers must never mutate hard-linked snapshot files.
