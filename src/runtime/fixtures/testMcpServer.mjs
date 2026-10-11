@@ -18,10 +18,25 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const text = (value) => ({ content: [{ type: "text", text: value }] });
 
 const TOOLS = {
+  process_clock: {
+    description: "Observes the language clock and an ordinary descendant process clock",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    call: () => ({ structuredContent: { languageMs: Date.now(), dateSeconds: Number(execFileSync("/bin/date", ["-u", "+%s"], { encoding: "utf8" }).trim()) } })
+  },
+  task_clock: {
+    description: "Reports only the task clock environment",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    call: () => ({ structuredContent: Object.fromEntries([
+      "NOOPOLIS_TASK_CLOCK", "MNEME_CLOCK_ORIGIN", "MNEME_CLOCK_ANCHOR_MS", "MNEME_CLOCK_FUTURE",
+      "FAKETIME_SKIP_CMDS", "FAKETIME_ONLY_CMDS", "DYLD_INSERT_LIBRARIES",
+      "FAKETIME", "FAKETIME_DONT_FAKE_MONOTONIC", "LD_PRELOAD", "LC_ALL"
+    ].filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]])) })
+  },
   /** Content only, and the original fixture's behaviour, unchanged. */
   checkpoint: {
     description: "Records one bounded checkpoint",

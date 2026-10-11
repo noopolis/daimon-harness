@@ -39,6 +39,141 @@ current-user-owned, and not unsafe through symlinks or writable permissions.
 The control token is named by `host.controlTokenEnv`; only the variable name is
 stored in config. HTTP requests use `Authorization: Bearer <token>`.
 
+## Task clock environment
+
+Set `NOOPOLIS_TASK_CLOCK` before startup to consume the ecosystem task clock:
+
+```json
+{"version":"noopolis.task-clock.v1","origin":"2024-02-29T12:00:00+02:00","anchorEpochMs":1800000000000}
+```
+
+Task time advances as `Date.parse(origin) + (Date.now() - anchorEpochMs)`.
+The origin must be a valid ISO-8601 instant with `Z` or an explicit offset;
+the anchor must be a safe integer. Origins and every task instant must fall within
+`1970-01-01T00:00:00.000Z` .. `9999-12-31T23:59:59.999Z` (inclusive, UTC).
+The parser refuses earlier/later origins, including offsets that cross a bound;
+task-time reads outside this range throw. The Paris 1900 case is therefore
+rejected by the parser. This UTC range alone does not exclude every timezone
+offset containing seconds or every five-digit local year: Monrovia in 1970 and
+Kiritimati near the upper bound still expose unsupported cron formatting.
+Invalid JSON, missing or unknown fields,
+wrong versions, invalid dates, offset-less origins and invalid anchors refuse
+startup with a `NOOPOLIS_TASK_CLOCK` error. An empty value is invalid, not unset.
+Unset preserves existing behavior.
+
+This is an environment-only option shared by the organization runtime and the
+standalone Pi harness. It adds no public config field or callback and no
+compiler dependency. Keep the process environment fixed for the runtime's
+lifetime; a different clock requires restarting it.
+
+Daimon, engine CLI processes, authentication/registration probes and operational
+helpers stay on **real time**. Clocked engine launches strip `LD_PRELOAD`,
+`FAKETIME*`, `DYLD_*`, `NOOPOLIS_TASK_CLOCK` and `MNEME_CLOCK_*`; they never run
+the libfaketime readiness probe. Provider TLS and token expiry therefore keep
+the real clock. Only agent-facing tool/shell and MCP server processes receive
+the process clock. In-process Mneme uses its explicit clock option.
+
+| Engine / process | Clock mechanism or gap |
+| --- | --- |
+| Pi bash, Daimon-owned stdio MCP servers, scripted MCP/Moltnet children | Shared launch gate adds `LD_PRELOAD`, derived `FAKETIME`, `FAKETIME_DONT_FAKE_MONOTONIC=1`, `LC_ALL=C`; sentinel and offset probes gate execution. |
+| Codex (inspected CLI 0.162.1) | Per-invocation `-c shell_environment_policy={...,set={...}}` supplies those exact variables only to tool/shell children. The policy clears include filters and preserves automatic secret-name exclusions. |
+| Direct Grok (inspected 1.0.50; also documented inside pinned 1.0.34) | The same `shell_environment_policy.set` is written into the private `GROK_HOME/config.toml` for the turn, alongside the HTTP MCP registration, then removed. |
+| Brokered Grok 1.0.34 | **Integration gap:** the engine supports shell policy, but the attested, immutable worker config and fixed native launch contract have no per-turn clock channel. Native shell children remain real. Readiness reports this and allows the wake; implementing coverage requires a coordinated broker/config provisioning contract change. |
+| AGY (inspected CLI 1.3.3) | No supported tool-only environment setting found in CLI help or installed config fields. Native `run_command` remains real; readiness reports the gap and allows the wake. Daimon-mounted bash/MCP tools still shift. |
+| Claude Code (inspected 2.1.296) | Not a Daimon runtime engine. Its settings `env` is applied to the engine's own `process.env`, not just tools; do not use it for preload. No Claude launch adapter is added here. |
+
+Mechanism evidence: [Codex shell environment configuration](https://learn.chatgpt.com/docs/config-file/config-reference#shell_environment_policyset)
+plus installed `codex --help`; Grok's embedded **Shell Environment Policy**
+manual in both binaries documents `set`, filter order, and bash/terminal scope
+(`~/.grok/downloads/grok-1.0.50-macos-aarch64`, and the retained
+`grok-1.0.34-linux-aarch64` binary). AGY `--help` and `mcp add --help` expose
+server-scoped `--env`, but no native shell env setting. Claude's installed
+2.1.296 code applies `filterSettingsEnv(...?.env, ...)` through
+`Object.assign(process.env, ...)`; its settings `env` is session-wide.
+These inspections establish configuration support, not live provider/tool behavior.
+
+All currently generated engine MCP registrations are HTTP connections to
+Daimon's in-process mount; no engine-spawned stdio server is configured.
+Daimon spawns declared stdio servers itself and puts clock variables in that
+server's environment. Any future engine-spawned stdio registration must put them
+in the server's declared `env`, never in the engine environment.
+Remote MCP owners must arrange their own clock; Daimon cannot shift remote services.
+
+The caller's **Linux** image installs libfaketime and supplies `LD_PRELOAD`
+without shifting Daimon's own clock. Only library basenames matching
+`libfaketime*.so*` are accepted; missing, unrelated or mixed loader lists refuse
+shifted execution. `FAKETIME` is signed seconds `(originMs - anchorEpochMs) / 1000`,
+with exact millisecond precision: origin `2001-01-01T00:00:00.000Z`, anchor
+`1821692800250` yields `-843385600.250`. `LC_ALL=C` makes decimal parsing
+unambiguous and `FAKETIME_DONT_FAKE_MONOTONIC=1` preserves monotonic deadlines.
+[Libfaketime fractional offsets](https://github.com/wolfcw/libfaketime#readme)
+use seconds by default, without an `s` suffix.
+
+Shifted children have one offset owner and receive no `NOOPOLIS_TASK_CLOCK` or
+`MNEME_CLOCK_*`. A Mneme MCP server uses its already-shifted `Date.now()`.
+Inherited clock/loader controls are removed before applying the derived values.
+Declared child/server `LD_PRELOAD`, `DYLD_*`, `FAKETIME*`, `NOOPOLIS_TASK_CLOCK`
+or `MNEME_CLOCK_*` refuse startup even when empty or identical; this includes
+remote declarations and explicit-test MCP allowlists.
+
+The shared readiness gate covers Daimon-owned shifted children, including Pi
+bash and MCP discovery/calls. It refuses non-Linux execution and runs two bounded
+`/bin/date -u +%s` probes: sentinel `FAKETIME=-31536000` proves interposition,
+then the actual offset must observe task time, both within ±5 seconds.
+Missing preload/date, loader diagnostics or mismatch refuse the shifted launch.
+Near-zero offsets cannot pass unshifted. Successful probes are memoized per
+process/preload/offset; failures are never cached. Each launch still validates
+its environment and calendar range. First launch costs at most two five-second
+probes. Engines themselves are never shifted or interposition-probed.
+
+In-process memory feature-detects Mneme's root `createOffsetClock` export and
+passes `createMemoryRuntime({ clock })`. `noopolis/mneme#4` is merged but
+unreleased; clocked memory refuses startup until a supporting release is pinned
+(the final integration step). Capability tests cover both module shapes; they
+do not establish released Mneme behavior. Memory storage/policy remain Mneme's.
+
+Residuals: an engine CLI may itself inject the real current date into model
+context; measure that leak in **P5**. Statically linked/Go children that use vDSO
+or bypass the dynamic loader ignore libfaketime. Moltnet's explicit clock option
+(like Mneme's) is **P5 scope**. Pi's installed `grep`/`find` helpers lack an SDK
+environment hook and remain an existing coverage gap. No global `Date` patch,
+remote-clock guarantee or universal descendant coverage is claimed.
+
+Schedules select cron/timezone occurrences in task time and persist those task
+instants, including occurrence IDs. Real timers wait `due - taskNow`, since the
+clock advances at the real rate. Restart uses that persisted task-calendar state
+and the original shared anchor. Restoration uses the same inclusive 1970–9999
+bounds for due instants, jitter fire targets and pending occurrences; pre-1970
+state is refused. Use a separate acceptance store for a different clock contract;
+existing state is not translated between calendars.
+
+Callers, including Moltnet attention producers and training harnesses replaying
+production wakes, must stamp deliveries in **real time**. Daimon projects each
+envelope as `taskOccurredAt = occurred_at + (originMs - anchorEpochMs)` for the
+wake, attention prompt and `daimon_inbox`, preserving relative offsets and queue
+age. Only native schedules carry private durable provenance for already-task-time
+occurrences; external `kind: "schedule"` deliveries are projected normally.
+Older records without this provenance are treated as real-time deliveries; use a
+fresh store if they contain already-clocked native schedule occurrences.
+Moltnet message timestamps inside tool results stay as stored; Moltnet's clock
+remains **P5 scope**.
+
+| Time surface | Clock / treatment |
+| --- | --- |
+| Final wake prompt, including memory, world, dream and direct-memory example wakes (`piAgentHandle`, `prompts`, `jungianPlayAgent`) | Byte-identical for the same formatted input; no clock prefix or wrapper. |
+| Mneme prompts, memory tools, recall and storage | Mneme receives `clock`; Daimon does not rewrite memory data. |
+| Native schedule occurrence shown in attention prompt / `daimon_inbox` (`organizationRuntimeControl`) | Select occurrences in task time; timestamps and delivery IDs refer to that task-calendar occurrence. |
+| Incoming wake/inbox envelope `occurred_at` | Project real delivery instants by the clock offset once; preserve trusted native schedule occurrences. Stored producer metadata and historical dates inside message text remain unchanged. |
+| Replayed `moltnet_send` receipt `at` (`productionAgentTools`) | Convert the stored real timestamp to task time for both model-visible result channels. |
+| `moltnet_read`, external MCP results, world ticks | Historical/external payloads remain verbatim; clock-aware external tools own their current timestamps. |
+| Schedule due times and persisted schedule state | Task-calendar instants when clocked; real timer delays. |
+| Sleeps, wake/CLI/MCP/world deadlines, auth expiry, claim leases, retention, fuses, latency | Real time, unchanged. |
+| Budget epoch in `daimon_inbox` | Preserve the production identifier shape, replacing only a Daimon-derived date suffix with the current task date. Operator labels, counts and internal real-day rollover remain unchanged. |
+| Activity/health (`organizationRuntimeHost`, `piAgentHandle`), drain state (`organizationRuntimeControl`) | Real operational bookkeeping on control APIs. |
+| Acceptance receipts/reconciliation (`wakeAcceptanceStore`, `wakeAcceptanceReconciliation`), tool receipts (`productionAgentTools`), fuse admissions/trips (`wakeFuse`) | Real timestamps on disk; model-visible projections are classified above. |
+| Usage/request/inference/seal ledgers (`turnUsageLedger`, `turnRequestLedger`, `inferenceUsageLedger`, `grokEngineBrokerLedger`, `engineBrokerSealLedger`); broker request timings (`grokBrokerTurnMeter`) | Real accounting and latency measurements. |
+| Pi session event timestamps (`cliSession`), turn traces (`turnTrace`), raw training captures (`rawTrainingCapture`), world trajectories (`worldTrajectory`), causal telemetry (`causalEvents`) | Real diagnostic bookkeeping, unchanged. |
+
 Runtime endpoints:
 
 - `GET /healthz` is unauthenticated process health.

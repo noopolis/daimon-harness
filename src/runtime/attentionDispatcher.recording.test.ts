@@ -148,3 +148,22 @@ test("shutdown during a never-resolving capture settles at its deadline", { time
   const start = performance.now(); await f.dispatcher.stop(); await run;
   assert.ok(performance.now() - start < 1000);
 });
+
+
+test("a clock projection failure clears its heartbeat and execution claim", async (t) => {
+  const f = await fixture(t, false, false);
+  const previous = process.env;
+  process.env = { ...previous, NOOPOLIS_TASK_CLOCK: JSON.stringify({ version: "noopolis.task-clock.v1", origin: "1970-01-01T00:00:00Z", anchorEpochMs: Date.now() + 60000 }) };
+  const timers = t.mock.method(globalThis, "setInterval", globalThis.setInterval);
+  const clears = t.mock.method(globalThis, "clearInterval", globalThis.clearInterval);
+  t.after(() => {
+    // Also reap a regression's leaked timer so a failing test cannot hang the suite.
+    for (const call of timers.mock.calls) clearInterval(call.result);
+    process.env = previous;
+  });
+  await f.run();
+  assert.equal(f.requests.length, 0, "an invalid instant never reaches cognition");
+  assert.equal(timers.mock.callCount(), 1);
+  assert.ok(clears.mock.calls.some((call) => call.arguments[0] === timers.mock.calls[0]!.result));
+  assert.deepEqual(f.dispatcher.activeExecutions(), []);
+});

@@ -1,16 +1,28 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { readTaskClock, taskClockTimestamp } from "./taskClock.js";
+import type { StoredWakeAcceptanceRecord } from "./wakeAcceptanceRecord.js";
 
 import type { AttentionConfig } from "../contracts/attentionContract.js";
 export type { AttentionConfig } from "../contracts/attentionContract.js";
 export type AttentionMessage = Readonly<{ delivery_id: string; acceptance_id: string; kind: string; text: string; occurred_at: string }>;
 export type AttentionTurn = Readonly<{
   executionId: string;
+  /** Projected once by the dispatcher; already in the agent's clock domain. */
   messages: readonly AttentionMessage[];
   budget(): Promise<unknown>;
   disposition(deliveryId: string, disposition: "complete" | "defer"): Promise<void>;
 }>;
 /** Owned by one control host; never shared across hosts or agent identities. */
 export type AttentionRegistry = Map<string, AttentionTurn>;
+
+/** Project real delivery instants, preserving queue age and relative offsets.
+ * Only the private durable provenance exempts a native task-calendar occurrence. */
+export function taskClockAttentionMessages(records: readonly Pick<StoredWakeAcceptanceRecord, "acceptance_id" | "delivery_id" | "event" | "native_schedule">[]): readonly AttentionMessage[] {
+  const clock = readTaskClock();
+  return records.map((record) => ({ acceptance_id: record.acceptance_id, delivery_id: record.delivery_id, ...record.event,
+    occurred_at: record.native_schedule === true ? record.event.occurred_at : taskClockTimestamp(record.event.occurred_at, clock)
+  }));
+}
 
 export function attentionTools(agentId: string, registry: AttentionRegistry): ToolDefinition[] {
   const current = (): AttentionTurn => { const turn = registry.get(agentId); if (!turn) throw new Error("No active inbox turn"); return turn; };
@@ -19,7 +31,11 @@ export function attentionTools(agentId: string, registry: AttentionRegistry): To
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute() {
       const turn = current();
-      const details = { version: "noopolis.daimon.inbox.v1", execution_id: turn.executionId, messages: turn.messages, budget: await turn.budget() };
+      const budget = await turn.budget();
+      const clock = readTaskClock();
+      const visibleBudget = clock !== undefined && budget !== null && typeof budget === "object" && "epoch" in budget && typeof budget.epoch === "string"
+        ? { ...budget, epoch: budget.epoch.replace(/^(organization-[a-f0-9]{64}-)\d{4}-\d{2}-\d{2}$/u, `$1${new Date(clock.now()).toISOString().slice(0, 10)}`) } : budget;
+      const details = { version: "noopolis.daimon.inbox.v1", execution_id: turn.executionId, messages: turn.messages, budget: visibleBudget };
       return { content: [{ type: "text", text: JSON.stringify(details) }], details };
     }
   }, {

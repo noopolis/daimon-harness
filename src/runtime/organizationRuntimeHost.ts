@@ -1,5 +1,6 @@
 import type { AttentionRegistry } from "./attention.js";
 import { consumeDurableAdmission, registerRecordingVerifier } from "./organizationRuntimeAdmission.js";
+import { readTaskClock, taskClockChildEnvironment } from "./taskClock.js";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { AgentHandle, AgentStatus, WakeEvent } from "../core/types.js";
 import { sanitizeWakeCompletionText } from "./wakeAcceptanceTypes.js";
@@ -167,6 +168,8 @@ function createHost(
     if (state === "running") return;
     if (startPromise !== undefined) return startPromise;
     if (stopRequested) throw new Error("organization runtime host has been stopped");
+    const clock = readTaskClock();
+    for (const agent of config.agents) for (const server of agent.mcp ?? []) taskClockChildEnvironment(server.env, clock);
     if (controlToken === undefined || !controlToken.trim()) {
       throw new Error(`required control token ${config.host.controlTokenEnv} is missing or blank`);
     }
@@ -341,12 +344,9 @@ function createHost(
 
 function toCoreWake(request: OrganizationRuntimeWakeRequest): WakeEvent {
   return {
-    id: request.event.id,
-    kind: request.event.kind === "external" ? "manual" : request.event.kind,
-    text: request.event.text
+    id: request.event.id, kind: request.event.kind === "external" ? "manual" : request.event.kind, text: request.event.text
   };
 }
-
 function agentHealthState(agent: HostedAgent): OrganizationRuntimeAgentHealth["state"] {
   const status: AgentStatus | undefined = agent.handle?.status();
   return agent.state === "running" || agent.state === "failed" || agent.state === "stopped"

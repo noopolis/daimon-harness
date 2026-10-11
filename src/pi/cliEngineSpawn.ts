@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawnRealTime as spawn, type ChildProcess } from "../runtime/taskClockProcess.js";
+import { codexTaskClockArgs } from "./engineTaskClock.js";
 
 import { trackCliChild } from "./cliProcess.js";
 import { cliChildEnvironment } from "./cliEnvironment.js";
@@ -65,7 +66,7 @@ export const renderCodexArgs = (
   "-c", `mcp_servers.daimon.url=${endpoint}`,
   "-c", "features.apps=false", "-c", "features.plugins=false",
   "-c", "mcp_servers.daimon.enabled=true",
-  "-c", "mcp_servers.daimon.required=true", "-"];
+  "-c", "mcp_servers.daimon.required=true", ...codexTaskClockArgs(), "-"];
 };
 
 export const renderCodexPermissionProfile = (

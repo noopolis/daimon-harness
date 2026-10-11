@@ -1,3 +1,4 @@
+import { assertTaskInstant, validTaskInstant } from "./taskClock.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readFile, rename, unlink } from "node:fs/promises";
@@ -36,7 +37,7 @@ export type ScheduleControllerOptions = Readonly<{
 
 /** Schedules create durable pending occurrences; engine execution remains elsewhere. */
 export function createScheduleController(options: ScheduleControllerOptions): ScheduleController {
-  const now = options.now ?? Date.now;
+  const now = () => assertTaskInstant((options.now ?? Date.now)());
   const random = options.random ?? Math.random;
   const setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
   const clearTimer = options.clearTimer ?? clearTimeout;
@@ -132,6 +133,7 @@ export function createScheduleController(options: ScheduleControllerOptions): Sc
 }
 
 export function occurrenceFor(agentId: string, schedule: ActiveSchedule, at: number): ScheduledOccurrence {
+  assertTaskInstant(at);
   const local = schedule.kind === "cron" ? occurrenceForOffset(at, schedule.timezone) : new Date(at).toISOString();
   return { agentId, occurredAt: new Date(at).toISOString(), prompt: schedule.prompt, deliveryId: `schedule:${identity(agentId, schedule)}:${local}` };
 }
@@ -144,14 +146,16 @@ export function isCanonicalScheduleDeliveryId(value: string): boolean {
 }
 
 export function nextOccurrence(agentId: string, schedule: ActiveSchedule, anchor: number | undefined, from: number): number {
+  assertTaskInstant(from);
+  if (anchor !== undefined) assertTaskInstant(anchor);
   if (schedule.kind === "every") {
     const base = anchor ?? from;
-    return base > from ? base : base + (Math.floor((from - base) / schedule.interval_ms) + 1) * schedule.interval_ms;
+    return assertTaskInstant(base > from ? base : base + (Math.floor((from - base) / schedule.interval_ms) + 1) * schedule.interval_ms);
   }
   const fields = parseCron(schedule.cron);
   if (!calendarPossible(fields)) throw new Error(`schedule ${agentId} is impossible`);
   const found = searchCron(fields, schedule.timezone, from, from + SEARCH_HORIZON_MS, 1);
-  if (found !== undefined) return found;
+  if (found !== undefined) return assertTaskInstant(found);
   throw new Error(`schedule ${agentId} has no occurrence within the deterministic search bound`);
 }
 
@@ -167,7 +171,7 @@ export function jitterOffsetMs(schedule: ActiveSchedule | undefined, random: () 
 
 function withFireTarget(entry: Entry, schedule: ActiveSchedule, random: () => number): Entry {
   const offset = jitterOffsetMs(schedule, random);
-  return offset === 0 ? entry : { ...entry, fire_at_ms: entry.next_due_ms + offset };
+  return offset === 0 ? entry : { ...entry, fire_at_ms: assertTaskInstant(entry.next_due_ms + offset) };
 }
 
 function withoutPending(entry: Entry): Entry {
@@ -273,12 +277,12 @@ async function restore(
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("schedule state is invalid");
     const entry = raw as Record<string, unknown>; const keys = Object.keys(entry).sort().join();
     if (!["fire_at_ms,next_due_ms", "fire_at_ms,latest_pending,next_due_ms", "latest_pending,next_due_ms", "next_due_ms"].includes(keys)) throw new Error("schedule state is invalid");
-    if (!Number.isSafeInteger(entry.next_due_ms) || (entry.next_due_ms as number) < 0) throw new Error("schedule state is invalid");
+    if (!validTaskInstant(entry.next_due_ms)) throw new Error("schedule state is invalid");
     const nextDue = entry.next_due_ms as number;
     const fireAt = entry.fire_at_ms;
     if (fireAt !== undefined) {
       const maximumFireAt = nextDue + jitterOffsetMs(allowed.get(key)!.schedule, () => 0.999_999_999);
-      if (!Number.isSafeInteger(fireAt) || (fireAt as number) < nextDue || (fireAt as number) > maximumFireAt) throw new Error("schedule state is invalid");
+      if (!validTaskInstant(fireAt) || fireAt < nextDue || fireAt > maximumFireAt) throw new Error("schedule state is invalid");
     }
     const pending = entry.latest_pending === undefined ? undefined : parseOccurrence(entry.latest_pending);
     if (pending !== undefined) assertRestoredOccurrence(key, allowed.get(key)!, pending, nextDue);
@@ -305,7 +309,7 @@ function parseOccurrence(value: unknown): ScheduledOccurrence {
   const item = value as Record<string, unknown>;
   if (Object.keys(item).sort().join() !== "agentId,deliveryId,occurredAt,prompt" || Object.values(item).some((entry) => typeof entry !== "string" || Buffer.byteLength(entry, "utf8") > 16_384)) throw new Error("schedule state is invalid");
   const occurredAt = item.occurredAt as string;
-  if (Number.isNaN(Date.parse(occurredAt)) || new Date(occurredAt).toISOString() !== occurredAt || !/^schedule:[a-f0-9]{64}:/u.test(item.deliveryId as string)) throw new Error("schedule state is invalid");
+  if (!validTaskInstant(Date.parse(occurredAt)) || new Date(occurredAt).toISOString() !== occurredAt || !/^schedule:[a-f0-9]{64}:/u.test(item.deliveryId as string)) throw new Error("schedule state is invalid");
   return item as unknown as ScheduledOccurrence;
 }
 async function persist(file: string, value: State, directory: Awaited<ReturnType<typeof open>>, observe?: ScheduleControllerOptions["onPersistStageForTest"]): Promise<void> {

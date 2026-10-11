@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawnRealTime as spawn, type ChildProcess } from "../runtime/taskClockProcess.js";
 
 import { readChild } from "./cliChildOutput.js";
 import { terminateChild, trackCliChild } from "./cliProcess.js";

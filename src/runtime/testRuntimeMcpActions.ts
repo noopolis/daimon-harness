@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { readyTaskClockEnvironment } from "./taskClockProcess.js";
+import { taskClockChildEnvironment } from "./taskClock.js";
 
 const MAX_CONFIG_BYTES = 65_536; const MAX_ACTIONS = 16; const MAX_ARGUMENT_BYTES = 16_384;
 type Server = Readonly<{ id: string; agent_id: string; command: string; args: string[]; tools: string[]; env_names: string[] }>;
@@ -15,6 +17,7 @@ export async function createScriptedMcpActions(value: unknown, configPath: unkno
   const [configStat, receiptStat] = await Promise.all([lstat(configPath), lstat(receiptPath)]); if ([configStat, receiptStat].some((stat) => !stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_CONFIG_BYTES)) throw new Error("scripted MCP artifact is unsafe");
   const configBytes = await readFile(configPath); const receipt = record(JSON.parse(await readFile(receiptPath, "utf8"))); const servers = parseConfig(JSON.parse(configBytes.toString("utf8")));
   if (receipt.version !== "spawnfile.explicit-test-mcp-receipt.v1" || receipt.artifact_sha256 !== `sha256:${createHash("sha256").update(configBytes).digest("hex")}`) throw new Error("scripted MCP artifact attestation mismatch");
+  for (const server of servers.values()) taskClockChildEnvironment(Object.fromEntries(server.env_names.map((name) => [name, "declared"])));
   for (const action of actions) { const server = servers.get(action.server_id); if (!server || server.agent_id !== action.trigger.agent_id || !server.tools.includes(action.tool)) throw new Error("scripted MCP action is not declared"); }
   return async (request) => {
     const receipts: ScriptedMcpReceipt[] = [];
@@ -24,7 +27,7 @@ export async function createScriptedMcpActions(value: unknown, configPath: unkno
 }
 async function call(server: Server, action: Action, deliveryId: string): Promise<ScriptedMcpReceipt> {
   const env = Object.fromEntries(server.env_names.map((name) => { const value = process.env[name]; if (value === undefined) throw new Error(`scripted MCP environment ${name} is missing`); return [name, value]; }));
-  const transport = new StdioClientTransport({ command: server.command, args: server.args, env, stderr: "pipe" });
+  const transport = new StdioClientTransport({ command: server.command, args: server.args, env: readyTaskClockEnvironment({ ...env, ...taskClockChildEnvironment(env) }) as Record<string, string>, stderr: "pipe" });
   const client = new Client({ name: "daimon-explicit-test-runtime", version: "1" }, { capabilities: {} });
   try {
     await client.connect(transport);

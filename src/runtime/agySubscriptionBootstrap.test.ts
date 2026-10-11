@@ -21,7 +21,10 @@ test("constructs an argument-free interactive AGY child with only Daimon's exact
   assert.equal(invocation.env.AGY_TOKEN, undefined);
 });
 
-test("runs interactive enrollment and the models proof only as AGY children", async () => {
+test("runs interactive enrollment and the models proof only as AGY children", async (t) => {
+  const previousEnvironment = process.env;
+  process.env = { ...previousEnvironment, NOOPOLIS_TASK_CLOCK: JSON.stringify({ version: "noopolis.task-clock.v1", origin: "2001-01-01T00:00:00Z", anchorEpochMs: Date.now() }), LD_PRELOAD: "/missing/libfaketime.so.1", FAKETIME: "stale" };
+  t.after(() => { process.env = previousEnvironment; });
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-agy-bootstrap-"));
   const workspacePath = path.join(root, "workspace");
   const runtimeHomePath = path.join(root, "runtime");

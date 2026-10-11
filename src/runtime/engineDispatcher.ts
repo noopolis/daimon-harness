@@ -1,4 +1,7 @@
+import { reportEngineTaskClockGap } from "../pi/engineTaskClock.js";
 import { attentionTools, type AttentionRegistry } from "./attention.js";
+import { readTaskClock } from "./taskClock.js";
+import { memoryClockOptions } from "../pi/memoryClock.js";
 import { grokDaimonToolName, grokMountedToolNamingRule } from "../contracts/grokWorkerContract.js";
 import path from "node:path";
 
@@ -33,6 +36,9 @@ export async function startOrganizationRuntimeEngine(
   sharedProtectedPaths: readonly string[] = [],
   attention?: AttentionRegistry
 ): Promise<AgentHandle> {
+  const clock = readTaskClock();
+  reportEngineTaskClockGap(agent.engine.kind, grokBroker !== undefined);
+  if (agent.memory !== undefined) memoryClockOptions(clock);
   // A declared Grok model is enforced by the broker proxy and worker config;
   // the direct path has neither, so it refuses rather than silently ignoring it.
   if (agent.engine.kind === "grok" && agent.engine.model !== undefined && grokBroker === undefined) throw new Error(`Agent ${agent.id} declares a Grok model, which requires the engine broker`);

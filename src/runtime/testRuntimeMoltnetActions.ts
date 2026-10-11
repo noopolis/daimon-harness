@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import { isCanonicalScheduleDeliveryId } from "./schedule.js";
+import { readyTaskClockEnvironment } from "./taskClockProcess.js";
 
 const run = promisify(execFile);
 const MAX_ACTIONS = 16;
@@ -21,7 +22,7 @@ export async function createScriptedMoltnetActions(value: unknown, cliPath: unkn
     const receipts: ScriptedMoltnetReceipt[] = [];
     for (const action of actions.filter((candidate) => candidate.delivery_id === deliveryId)) {
       const { stdout } = await run(cliPath, ["send", "--config", configPath, "--network", action.network_id, "--target", action.target, "--text", action.text], {
-        env: { ...process.env, DAIMON_WAKE_ID: deliveryId }, maxBuffer: 65_536, timeout: 10_000
+        env: readyTaskClockEnvironment({ ...process.env, DAIMON_WAKE_ID: deliveryId }), maxBuffer: 65_536, timeout: 10_000
       });
       const receipt = record(JSON.parse(stdout));
       if (receipt.accepted !== true || typeof receipt.message_id !== "string" || !receipt.message_id) throw new Error("Moltnet action was not accepted");

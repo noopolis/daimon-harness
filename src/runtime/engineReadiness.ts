@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawnRealTime as spawn } from "./taskClockProcess.js";
 import { createHash } from "node:crypto";
 
 import { cliChildEnvironment } from "../pi/cliEnvironment.js";

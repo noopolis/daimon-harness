@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readTaskClock } from "../runtime/taskClock.js";
 
 type CliEnvironmentIntent = Readonly<{
   dbusSessionBusAddress?: string;
@@ -14,6 +15,7 @@ export const DAIMON_WAKE_ID_ENV = "DAIMON_WAKE_ID" as const;
 export const cliChildEnvironment = (
   _redactedNames: readonly string[], runtimeHomePath?: string, intent: CliEnvironmentIntent = {}
 ): NodeJS.ProcessEnv => {
+  readTaskClock(); // Validate the contract, but provider CLIs always run on real time.
   if (runtimeHomePath === undefined) {
     // This legacy branch is only used by the standalone Pi helpers, which do
     // not claim production organization-runtime isolation.

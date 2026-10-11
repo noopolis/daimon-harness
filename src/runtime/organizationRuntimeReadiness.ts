@@ -1,5 +1,8 @@
+import { reportEngineTaskClockGap } from "../pi/engineTaskClock.js";
 import { startAgySubscriptionRealm, type AgySubscriptionRealm } from "./agySubscriptionRealm.js";
 import { prepareEngineExecutable, verifyAgySubscriptionEnrollment } from "./engineReadiness.js";
+import { readTaskClock } from "./taskClock.js";
+import { memoryClockOptions } from "../pi/memoryClock.js";
 import type { OrganizationRuntimeConfig } from "./organizationRuntime.js";
 import { prepareOrganizationRuntimePaths, type OrganizationRuntimePathAuthority } from "./physicalReadiness.js";
 import { materializePortableCredential } from "./portableCredentialMaterial.js";
@@ -15,6 +18,9 @@ export type OrganizationRuntimeHostReadiness = Readonly<{
 export async function prepareProductionReadiness(
   config: OrganizationRuntimeConfig
 ): Promise<OrganizationRuntimeHostReadiness> {
+  const clock = readTaskClock();
+  for (const agent of config.agents) reportEngineTaskClockGap(agent.engine.kind, agent.engine.kind === "grok");
+  if (config.agents.some((agent) => agent.memory !== undefined)) memoryClockOptions(clock);
   const paths = await prepareOrganizationRuntimePaths(config.agents);
   let realm: AgySubscriptionRealm | undefined;
   let grokBroker: EngineBrokerControlClient | undefined;
