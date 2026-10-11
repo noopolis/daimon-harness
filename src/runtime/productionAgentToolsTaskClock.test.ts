@@ -1,3 +1,4 @@
+import { readyTaskClockEnvironment, resetTaskClockProcessForTest } from "./taskClockProcess.js";
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -16,6 +17,12 @@ async function fixture(t: TestContext) {
   const previous = process.env; process.env = { ...previous, NOOPOLIS_TASK_CLOCK: raw, MNEME_CLOCK_ORIGIN: "stale", MNEME_CLOCK_ANCHOR_MS: "123", MNEME_CLOCK_FUTURE: "stale", FAKETIME_SKIP_CMDS: "node", FAKETIME_ONLY_CMDS: "date", DYLD_INSERT_LIBRARIES: "/other", LD_PRELOAD: expected.LD_PRELOAD };
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-clock-tools-"));
   t.after(async () => { process.env = previous; await rm(root, { recursive: true, force: true }); });
+  resetTaskClockProcessForTest();
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { value: "linux" });
+  t.after(() => { Object.defineProperty(process, "platform", platform); resetTaskClockProcessForTest(); });
+  // Environment propagation only; the Linux integration test covers real interposition.
+  readyTaskClockEnvironment({}, undefined, (_command, _args, env) => String(Math.floor((Date.now() + Number(env.FAKETIME) * 1000) / 1000)));
   const agent: OrganizationRuntimeAgentConfig = { id: "a", name: "A", instructions: "test", workspacePath: root, runtimeHomePath: root, engine: { kind: "codex" } };
   return { root, agent };
 }

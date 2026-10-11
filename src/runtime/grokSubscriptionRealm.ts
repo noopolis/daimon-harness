@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "./taskClockProcess.js";
 import { lstat, open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { terminateChild, trackCliChild } from "../pi/cliProcess.js";

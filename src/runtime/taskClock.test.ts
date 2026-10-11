@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseTaskClock, readTaskClock, taskClockChildEnvironment, taskClockPreload, taskClockProcessEnvironment, taskClockTimestamp, TASK_CLOCK_VERSION } from "./taskClock.js";
+import { parseTaskClock, readTaskClock, taskClockChildEnvironment, taskClockPreload, taskClockProcessEnvironment, taskClockTimestamp, TASK_CLOCK_VERSION, TASK_CLOCK_MAX_MS } from "./taskClock.js";
 
+const preload = { LD_PRELOAD: "/caller/libfaketime.so.1" };
 const config = { version: TASK_CLOCK_VERSION, origin: "2024-02-29T12:30:00.125+02:00", anchorEpochMs: 1_800_000_000_000 };
 
 test("task clock advances from the original anchor and preserves the exact contract bytes", (t) => {
@@ -10,12 +11,12 @@ test("task clock advances from the original anchor and preserves the exact contr
   assert.equal(clock.raw, raw);
   assert.equal(clock.now(), Date.parse(config.origin) + 2500);
   assert.equal(taskClockTimestamp(new Date(config.anchorEpochMs + 500).toISOString(), clock), "2024-02-29T10:30:00.625Z");
-  assert.deepEqual(taskClockChildEnvironment({}, clock, {}), {
-    FAKETIME: "-90797399.875", FAKETIME_DONT_FAKE_MONOTONIC: "1", LC_ALL: "C"
+  assert.deepEqual(taskClockChildEnvironment({}, clock, preload), {
+    FAKETIME: "-90797399.875", FAKETIME_DONT_FAKE_MONOTONIC: "1", LC_ALL: "C", ...preload
   });
 });
 
-for (const origin of ["2024-01-01T00:00:00Z", "2024-01-01T00:00:00-05:30", "2024-01-01T00:00:00.123456+0530", "2000-02-29T12:00:00Z", "0000-02-29T00:00:00Z"]) {
+for (const origin of ["2024-01-01T00:00:00Z", "2024-01-01T00:00:00-05:30", "2024-01-01T00:00:00.123456+0530", "2000-02-29T12:00:00Z", "1970-01-01T00:00:00Z", "9999-12-31T23:59:59.999Z"]) {
   test(`accepts ISO instant ${origin}`, () => assert.ok(parseTaskClock(JSON.stringify({ ...config, origin }))));
 }
 for (const anchorEpochMs of [0, -1, Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER]) {
@@ -55,7 +56,7 @@ test("every declared clock control is rejected, even empty or equal to the deriv
 test("libfaketime allowlist rejects mixed or unrelated loader values", () => {
   for (const value of [undefined, "", "/tmp/libclock.so", "/tmp/libfaketime.dylib", "/tmp/libfaketime.so.1:/tmp/evil.so", "libfaketime.so.1 libother.so"]) {
     assert.equal(taskClockPreload(value), undefined);
-    assert.equal(taskClockChildEnvironment({}, parseTaskClock(JSON.stringify(config)), { LD_PRELOAD: value }).LD_PRELOAD, undefined);
+    assert.throws(() => taskClockChildEnvironment({}, parseTaskClock(JSON.stringify(config)), { LD_PRELOAD: value }), /requires caller-provided LD_PRELOAD/u);
   }
   for (const value of ["/usr/lib/libfaketime.so.1", "libfaketimeMT.so.1"]) {
     assert.equal(taskClockChildEnvironment({}, parseTaskClock(JSON.stringify(config)), { LD_PRELOAD: value }).LD_PRELOAD, value);
@@ -66,16 +67,16 @@ test("libfaketime allowlist rejects mixed or unrelated loader values", () => {
 test("relative offsets preserve signed milliseconds, including the shared Spawnfile vector", () => {
   for (const [offset, expected] of [[-3600000, "-3600"], [120000, "+120"], [0, "+0"], [499, "+0.499"], [500, "+0.500"], [1499, "+1.499"], [1500, "+1.500"], [-1501, "-1.501"], [-1, "-0.001"]] as const) {
     const clock = parseTaskClock(JSON.stringify({ ...config, origin: new Date(config.anchorEpochMs + offset).toISOString() }))!;
-    assert.equal(taskClockChildEnvironment({}, clock).FAKETIME, expected);
+    assert.equal(taskClockChildEnvironment({}, clock, preload).FAKETIME, expected);
   }
   const clock = parseTaskClock(JSON.stringify({ ...config, origin: "2001-01-01T00:00:00.000Z", anchorEpochMs: 1821692800250 }))!;
-  assert.equal(taskClockChildEnvironment({}, clock).FAKETIME, "-843385600.250");
+  assert.equal(taskClockChildEnvironment({}, clock, preload).FAKETIME, "-843385600.250");
 });
 
 test("child process time and host task time agree at second, midnight and leap-day boundaries", () => {
   for (const origin of ["2000-02-28T23:59:59.999Z", "2000-02-29T23:59:59.500Z", "2001-01-01T00:00:00.000Z"]) {
     const clock = parseTaskClock(JSON.stringify({ ...config, origin, anchorEpochMs: 1821692800250 }))!;
-    const offsetMs = Number(taskClockChildEnvironment({}, clock).FAKETIME) * 1000;
+    const offsetMs = Number(taskClockChildEnvironment({}, clock, preload).FAKETIME) * 1000;
     for (const elapsed of [0, 1, 499, 500, 1000]) {
       assert.equal(new Date(clock.anchorEpochMs + elapsed + offsetMs).toISOString(), new Date(clock.at(clock.anchorEpochMs + elapsed)).toISOString());
     }
@@ -89,4 +90,27 @@ test("inherited environments strip every offset and loader control before assign
   const inherited = { PATH: "/bin", NOOPOLIS_TASK_CLOCK: clock.raw, MNEME_CLOCK_ORIGIN: clock.origin, MNEME_CLOCK_ANCHOR_MS: String(clock.anchorEpochMs), MNEME_CLOCK_FUTURE: "1", FAKETIME: "wrong", FAKETIME_SKIP_CMDS: "node", FAKETIME_ONLY_CMDS: "date", DYLD_INSERT_LIBRARIES: "/other", LD_PRELOAD: "/other.so" };
   assert.deepEqual(taskClockProcessEnvironment(inherited, expected), { PATH: "/bin", ...expected });
   assert.deepEqual(taskClockProcessEnvironment(inherited, {}), inherited);
+});
+
+test("task origin range refuses 1960, Paris 1900 and offsets crossing either UTC bound", () => {
+  for (const origin of ["1960-01-01T00:00:00Z", "1900-01-01T00:00:00Z", "0900-01-01T00:00:00Z", "0000-01-01T00:00:00Z", "1970-01-01T00:00:00+00:01", "9999-12-31T23:59:59.999-00:01"]) {
+    assert.throws(() => parseTaskClock(JSON.stringify({ ...config, origin })), /task instant must be within 1970.*9999/u, origin);
+  }
+  // Instant bounds apply after normalizing explicit offsets.
+  assert.equal(parseTaskClock(JSON.stringify({ ...config, origin: "1969-12-31T23:00:00-01:00" }))!.at(config.anchorEpochMs), 0);
+});
+
+test("task reads accept both boundaries and throw beyond them, including invalid real reads", (t) => {
+  const clock = parseTaskClock(JSON.stringify({ ...config, origin: "1970-01-01T00:00:00Z", anchorEpochMs: 0 }))!;
+  for (const instant of [0, TASK_CLOCK_MAX_MS]) {
+    t.mock.method(Date, "now", () => instant);
+    assert.equal(clock.now(), instant);
+    assert.equal(clock.at(instant), instant);
+  }
+  for (const instant of [-1, TASK_CLOCK_MAX_MS + 1, NaN, Infinity, 0.5]) {
+    t.mock.method(Date, "now", () => instant);
+    assert.throws(() => clock.now(), /task instant must be within/u);
+    assert.throws(() => clock.at(instant), /task instant must be within/u);
+  }
+  assert.throws(() => taskClockTimestamp("1960-01-01T00:00:00Z", clock), /task instant must be within/u);
 });

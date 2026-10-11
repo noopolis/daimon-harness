@@ -1,5 +1,16 @@
 export const TASK_CLOCK_ENV = "NOOPOLIS_TASK_CLOCK";
 export const TASK_CLOCK_VERSION = "noopolis.task-clock.v1";
+export const TASK_CLOCK_MIN_MS = 0;
+export const TASK_CLOCK_MAX_MS = 253_402_300_799_999;
+
+export function validTaskInstant(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= TASK_CLOCK_MIN_MS && value <= TASK_CLOCK_MAX_MS;
+}
+
+export function assertTaskInstant(value: number): number {
+  if (!validTaskInstant(value)) throw invalid("task instant must be within 1970-01-01T00:00:00.000Z .. 9999-12-31T23:59:59.999Z");
+  return value;
+}
 
 export type TaskClock = Readonly<{
   raw: string;
@@ -26,7 +37,8 @@ export function parseTaskClock(raw: string | undefined): TaskClock | undefined {
   if (typeof fields.origin !== "string" || !validInstant(fields.origin)) throw invalid("origin must be a valid ISO-8601 instant with Z or an explicit offset");
   if (typeof fields.anchorEpochMs !== "number" || !Number.isSafeInteger(fields.anchorEpochMs)) throw invalid("anchorEpochMs must be a safe integer");
   const origin = fields.origin, anchorEpochMs = fields.anchorEpochMs, originMs = Date.parse(origin);
-  const at = (realEpochMs: number): number => originMs + (realEpochMs - anchorEpochMs);
+  assertTaskInstant(originMs);
+  const at = (realEpochMs: number): number => assertTaskInstant(originMs + (realEpochMs - anchorEpochMs));
   return Object.freeze({ raw, origin, anchorEpochMs, at, now: () => at(Date.now()) });
 }
 
@@ -44,6 +56,7 @@ export function taskClockChildEnvironment(
   const fraction = magnitude % 1000n;
   const seconds = `${offset < 0n ? "-" : "+"}${magnitude / 1000n}${fraction === 0n ? "" : `.${String(fraction).padStart(3, "0")}`}`;
   const preload = taskClockPreload(environment.LD_PRELOAD);
+  if (preload === undefined) throw invalid("process clock startup probe requires caller-provided LD_PRELOAD naming libfaketime*.so*; refusing clocked execution");
   return {
     // The child process clock owns the offset; Mneme and nested consumers use Date.now().
     // libfaketime's relative format defaults to seconds; an `s` suffix is not supported.
@@ -51,7 +64,7 @@ export function taskClockChildEnvironment(
     FAKETIME_DONT_FAKE_MONOTONIC: "1",
     // libfaketime parses decimal fractions using the process locale.
     LC_ALL: "C",
-    ...(preload === undefined ? {} : { LD_PRELOAD: preload })
+    LD_PRELOAD: preload
   };
 }
 

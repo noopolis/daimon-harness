@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, readyTaskClockEnvironment } from "./taskClockProcess.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir, rename, unlink } from "node:fs/promises";
@@ -35,6 +35,7 @@ const DAIMON_ACTION_ID_PREFIX = "daimon-";
 export async function createProductionAgentTools(agent: OrganizationRuntimeAgentConfig, wakeContext: PiWakeEnvironmentContextRef = {}): Promise<ToolDefinition[]> {
   taskClockChildEnvironment();
   for (const server of agent.mcp ?? []) taskClockChildEnvironment(server.env);
+  readyTaskClockEnvironment(cliChildEnvironment([], agent.runtimeHomePath));
   await ensureRuntimeHomeDirectory(agent.runtimeHomePath, "tool-state");
   // Resolved once, at agent start: a malformed bound is a configuration error
   // that should refuse the agent, not a surprise thrown from the middle of a
@@ -199,7 +200,7 @@ async function connect(agent: OrganizationRuntimeAgentConfig, server: Organizati
   taskClockChildEnvironment(server.env);
   const client = new Client({ name: "daimon-production", version: "0.2.0" }); const headers: Record<string, string> = server.authSecretEnv === undefined ? {} : { authorization: `Bearer ${requiredSecret(server.authSecretEnv)}` };
   const transport = server.transport === "stdio"
-    ? new StdioClientTransport({ command: server.command!, args: [...server.args], env: stringEnvironment({ ...server.env, ...cliChildEnvironment([], agent.runtimeHomePath, { executablePath: server.command }) }) })
+    ? new StdioClientTransport({ command: server.command!, args: [...server.args], env: stringEnvironment(readyTaskClockEnvironment({ ...server.env, ...cliChildEnvironment([], agent.runtimeHomePath, { executablePath: server.command }) })) })
     : server.transport === "sse" ? new SSEClientTransport(new URL(server.url!), { requestInit: { headers } })
       : new StreamableHTTPClientTransport(new URL(server.url!), { requestInit: { headers } });
   await client.connect(transport); return { client, close: () => client.close() };

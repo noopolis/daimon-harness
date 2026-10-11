@@ -1,3 +1,4 @@
+import { resetTaskClockProcessForTest } from "../runtime/taskClockProcess.js";
 import assert from "node:assert/strict";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -12,6 +13,7 @@ const anchorEpochMs = 1_800_000_000_123, origin = "2024-02-29T12:00:00+02:00";
 const raw = JSON.stringify({ version: "noopolis.task-clock.v1", origin, anchorEpochMs });
 const model = { auth: { method: "none" as const }, endpoint: { baseUrl: "http://127.0.0.1", compatibility: "openai" as const }, name: "stub", provider: "stub" };
 async function fixture(t: TestContext) {
+  resetTaskClockProcessForTest();
   const previous = process.env; process.env = { ...previous, NOOPOLIS_TASK_CLOCK: raw, NOOPOLIS_RUN_ID: "clock-tests", LD_PRELOAD: "/caller/libfaketime.so.1" };
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-clock-pi-"));
   t.after(async () => { process.env = previous; await rm(root, { recursive: true, force: true }); });
@@ -50,9 +52,9 @@ test("startup probes sentinel and offset once and Pi bash receives only the proc
     } } };
   };
   let probes = 0;
-  const adapter = new PiHarnessAdapter({ authPath: path.join(root, "auth.json"), model, sessionFactory: factory }, async (command, args, env) => {
+  const adapter = new PiHarnessAdapter({ authPath: path.join(root, "auth.json"), model, sessionFactory: factory }, (command, args, env) => {
     probes++;
-    assert.equal(command, "date"); assert.deepEqual(args, ["-u", "+%s"]);
+    assert.equal(command, "/bin/date"); assert.deepEqual(args, ["-u", "+%s"]);
     assert.deepEqual(env, { ...cliChildEnvironment([], input.runtimeHomePath), ...(probes === 1 ? { FAKETIME: "-31536000" } : {}) });
     return String(Math.floor((now + Number(env.FAKETIME) * 1000) / 1000));
   });

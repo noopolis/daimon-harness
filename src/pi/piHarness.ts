@@ -25,6 +25,7 @@ import { DAIMON_WAKE_ID_ENV } from "./cliEnvironment.js";
 import { createPiWorldTools, piWorldToolNames, type PiWorldBinding } from "./worldTools.js";
 import type { PiWorldToolContextRef } from "./worldNudge.js";
 import { ensureRuntimeHome, ensureRuntimeHomeDirectory } from "../runtime/runtimeHomeLayout.js";
+import { readyTaskClockEnvironment } from "../runtime/taskClockProcess.js";
 import { readTaskClock, taskClockChildEnvironment, taskClockProcessEnvironment } from "../runtime/taskClock.js";
 import { createClockedMemoryRuntime, memoryClockOptions } from "./memoryClock.js";
 import { verifyTaskClockProcess, type TaskClockProcessProbe } from "./taskClockProcess.js";
@@ -283,7 +284,7 @@ function createProtectedBashTool(
   const bash = createBashTool(workspacePath, {
     spawnHook: (context) => ({
       ...context,
-      env: {
+      env: readyTaskClockEnvironment({
         ...Object.fromEntries(Object.entries(taskClockProcessEnvironment(context.env, clockEnvironment)).filter(([name]) => !protectedNames.includes(name))),
         HOME: runtimeHomePath,
         XDG_CONFIG_HOME: `${runtimeHomePath}/.config`,
@@ -295,7 +296,7 @@ function createProtectedBashTool(
         ...(wakeEnvironmentContext.current === undefined
           ? {}
           : { [DAIMON_WAKE_ID_ENV]: wakeEnvironmentContext.current })
-      }
+      })
     })
   });
   return {

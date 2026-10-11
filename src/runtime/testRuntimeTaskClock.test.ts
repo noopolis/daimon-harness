@@ -1,3 +1,4 @@
+import { readyTaskClockEnvironment, resetTaskClockProcessForTest } from "./taskClockProcess.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -15,6 +16,12 @@ async function fixture(t: TestContext) {
   process.env = { ...previous, NOOPOLIS_TASK_CLOCK: JSON.stringify({ version: "noopolis.task-clock.v1", origin: "2001-01-01T00:00:00.000Z", anchorEpochMs: 1821692800250 }), LD_PRELOAD: expected.LD_PRELOAD, MNEME_CLOCK_ORIGIN: "stale", FAKETIME_SKIP_CMDS: "node", DAIMON_TEST_MCP_TOOLS: "task_clock" };
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-scripted-clock-"));
   t.after(async () => { process.env = previous; await rm(root, { recursive: true, force: true }); });
+  resetTaskClockProcessForTest();
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { value: "linux" });
+  t.after(() => { Object.defineProperty(process, "platform", platform); resetTaskClockProcessForTest(); });
+  // Environment propagation only; the Linux integration test covers real interposition.
+  readyTaskClockEnvironment({}, undefined, (_command, _args, env) => String(Math.floor((Date.now() + Number(env.FAKETIME) * 1000) / 1000)));
   const observed = path.join(root, "observed.json");
   const capture = `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(observed)}, JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(?:NOOPOLIS_TASK_CLOCK$|MNEME_CLOCK_|FAKETIME|DYLD_|LD_PRELOAD$)/.test(name)))));`;
   return { root, observed, capture };

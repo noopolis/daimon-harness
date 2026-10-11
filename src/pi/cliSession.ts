@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, readyTaskClockEnvironment, type ChildProcess } from "../runtime/taskClockProcess.js";
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -259,6 +259,7 @@ class CliSession implements PiSessionLike {
 
   public async prompt(text: string): Promise<void> {
     if (this.disposed) throw new Error("CLI session is disposed");
+    readyTaskClockEnvironment(cliChildEnvironment([], this.input.runtimeHomePath));
     await prepareCliRuntimeHome(this.input.runtimeHomePath);
     const deadline = this.options.timeoutMs === undefined ? undefined : Date.now() + this.options.timeoutMs;
     const environmentSecretValues = childSecretValues([

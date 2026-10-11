@@ -49,7 +49,14 @@ Set `NOOPOLIS_TASK_CLOCK` before startup to consume the ecosystem task clock:
 
 Task time advances as `Date.parse(origin) + (Date.now() - anchorEpochMs)`.
 The origin must be a valid ISO-8601 instant with `Z` or an explicit offset;
-the anchor must be a safe integer. Invalid JSON, missing or unknown fields,
+the anchor must be a safe integer. Origins and every task instant must fall within
+`1970-01-01T00:00:00.000Z` .. `9999-12-31T23:59:59.999Z` (inclusive, UTC).
+The parser refuses earlier/later origins, including offsets that cross a bound;
+task-time reads outside this range throw. The Paris 1900 case is therefore
+rejected by the parser. This UTC range alone does not exclude every timezone
+offset containing seconds or every five-digit local year: Monrovia in 1970 and
+Kiritimati near the upper bound still expose unsupported cron formatting.
+Invalid JSON, missing or unknown fields,
 wrong versions, invalid dates, offset-less origins and invalid anchors refuse
 startup with a `NOOPOLIS_TASK_CLOCK` error. An empty value is invalid, not unset.
 Unset preserves existing behavior.
@@ -88,7 +95,8 @@ CLI children receive the clock through the normal CLI environment.
 The caller's **Linux** image must install libfaketime and supply `LD_PRELOAD` in
 Daimon's environment without shifting Daimon's own clock. For clocked children,
 Daimon forwards that value only when every library basename matches
-`libfaketime*.so*`; unrelated or mixed loader lists are not forwarded. It derives
+`libfaketime*.so*`; missing, unrelated or mixed loader lists throw before an
+environment containing `FAKETIME` can be returned. It derives
 `FAKETIME` as signed seconds `(originMs - anchorEpochMs) / 1000`, preserving all
 milliseconds with at most three decimal places, and sets
 `FAKETIME_DONT_FAKE_MONOTONIC=1`. The shared vector (origin
@@ -98,13 +106,20 @@ milliseconds with at most three decimal places, and sets
 is locale-sensitive in libfaketime, so clocked child environments pin `LC_ALL=C`
 to keep the decimal point unambiguous.
 
-Before the first session/wake, each agent refuses non-Linux platforms and runs two
-bounded `date -u +%s` probes (argv, no shell) through the CLI environment builder:
-a sentinel `FAKETIME=-31536000` must first prove interposition within ±5 seconds,
-then the derived real offset must observe task time within ±5 seconds. A near-zero
-offset cannot pass on an unshifted process clock. Missing preload, failed/missing
-`date`, loader diagnostics or either mismatch refuse startup. Later wakes and
-dream sessions do not repeat the probes. Daimon never patches global `Date`;
+Every Daimon-owned child launch crosses the shared readiness boundary, including
+exported `spawnEngine`, standalone CLI sessions, engine preparation/registration,
+MCP stdio discovery and tool calls, Pi bash and scripted MCP/Moltnet actions.
+Production tool discovery checks readiness before connecting to any server.
+The boundary refuses non-Linux platforms and runs two bounded `/bin/date -u +%s`
+probes (argv, no shell) with the derived child environment: sentinel
+`FAKETIME=-31536000` first proves interposition within ±5 seconds, then the
+requested offset must observe task time within ±5 seconds. A near-zero offset
+cannot pass on an unshifted process clock. Missing preload, failed/missing
+`date`, loader diagnostics or either mismatch throw before the requested child
+spawns. Success is memoized per process, preload and offset; a failed probe is
+never cached. Each launch still validates and derives its environment and checks
+the supported time range. The first launch can block for at most two five-second
+probes; later launches reuse the result. Daimon never patches global `Date`;
 real waits and accounting remain on the host clock. This verifies the local
 mechanism, not the behavior of every engine or remotely hosted MCP service.
 Unset clocks preserve existing environments.
@@ -119,9 +134,10 @@ establish their behavior.
 Schedules select cron/timezone occurrences in task time and persist those task
 instants, including occurrence IDs. Real timers wait `due - taskNow`, since the
 clock advances at the real rate. Restart uses that persisted task-calendar state
-and the original shared anchor. Restoration accepts valid epoch milliseconds in
-years 0000–9999, including negative timestamps for pre-1970 tasks. Use a separate acceptance store for a different
-clock contract; existing state is not translated between calendars.
+and the original shared anchor. Restoration uses the same inclusive 1970–9999
+bounds for due instants, jitter fire targets and pending occurrences; pre-1970
+state is refused. Use a separate acceptance store for a different clock contract;
+existing state is not translated between calendars.
 
 | Time surface | Clock / treatment |
 | --- | --- |

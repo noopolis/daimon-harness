@@ -97,24 +97,24 @@ test("unset clock still selects the real calendar occurrence", async (t) => {
 });
 
 for (const kind of ["cron", "every"] as const) {
-  test(`1960 task origin restarts ${kind} schedules with negative due and fire timestamps`, { timeout: 5000 }, async (t) => {
-    const rig = await fixture(t, "1960-01-01T08:59:00Z", "UTC", "* * * * *", true, kind === "every" ? 60_000 : undefined);
+  test(`1970 boundary task origin restarts ${kind} schedules`, { timeout: 5000 }, async (t) => {
+    const rig = await fixture(t, "1970-01-01T00:00:00Z", "UTC", "* * * * *", true, kind === "every" ? 60_000 : undefined);
     const first = await rig.start();
     assert.equal(first.delay(), 60_000);
-    assert.equal(await first.nextDue(), Date.parse("1960-01-01T09:00:00Z"));
+    assert.equal(await first.nextDue(), Date.parse("1970-01-01T00:01:00Z"));
     await first.control.stop();
     rig.advance(30_000);
     const second = await rig.start();
     assert.equal(second.delay(), 30_000);
-    assert.equal(await second.nextDue(), Date.parse("1960-01-01T09:00:00Z"));
+    assert.equal(await second.nextDue(), Date.parse("1970-01-01T00:01:00Z"));
     rig.advance(30_000); second.fire();
     const occurrence = await second.delivered;
-    assert.equal(occurrence.occurred_at, "1960-01-01T09:00:00.000Z");
-    assert.match(occurrence.delivery_id, /:1960-01-01T09:00/u);
+    assert.equal(occurrence.occurred_at, "1970-01-01T00:01:00.000Z");
+    assert.match(occurrence.delivery_id, /:1970-01-01T00:01/u);
     assert.equal((await second.control.wakeReceipt("test", occurrence.acceptance_id))!.state, "completed");
     await second.control.stop();
     const third = await rig.start();
     assert.equal(third.delay(), 60_000);
-    assert.equal(await third.nextDue(), Date.parse("1960-01-01T09:01:00Z"));
+    assert.equal(await third.nextDue(), Date.parse("1970-01-01T00:02:00Z"));
   });
 }

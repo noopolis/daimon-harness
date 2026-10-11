@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { readyTaskClockEnvironment } from "./taskClockProcess.js";
 import { taskClockChildEnvironment } from "./taskClock.js";
 
 const MAX_CONFIG_BYTES = 65_536; const MAX_ACTIONS = 16; const MAX_ARGUMENT_BYTES = 16_384;
@@ -26,7 +27,7 @@ export async function createScriptedMcpActions(value: unknown, configPath: unkno
 }
 async function call(server: Server, action: Action, deliveryId: string): Promise<ScriptedMcpReceipt> {
   const env = Object.fromEntries(server.env_names.map((name) => { const value = process.env[name]; if (value === undefined) throw new Error(`scripted MCP environment ${name} is missing`); return [name, value]; }));
-  const transport = new StdioClientTransport({ command: server.command, args: server.args, env: { ...env, ...taskClockChildEnvironment(env) }, stderr: "pipe" });
+  const transport = new StdioClientTransport({ command: server.command, args: server.args, env: readyTaskClockEnvironment({ ...env, ...taskClockChildEnvironment(env) }) as Record<string, string>, stderr: "pipe" });
   const client = new Client({ name: "daimon-explicit-test-runtime", version: "1" }, { capabilities: {} });
   try {
     await client.connect(transport);
