@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readTaskClock, taskClockTimestamp } from "./taskClock.js";
 import { parseOrganizationRuntimeConfig, parseOrganizationRuntimeWakeRequest, type OrganizationRuntimeConfig, type OrganizationRuntimeHost, type OrganizationRuntimeShutdownCompletion } from "./organizationRuntime.js";
 import { createOrganizationRuntimeHostWithAttention } from "./organizationRuntimeHost.js";
 import { WakeFuse, type WakeBudgetSnapshot } from "./wakeFuse.js";
@@ -142,6 +143,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
     activity: async (request) => await host.activity(request),
     async start(): Promise<void> {
       if (started) return;
+      const clock = readTaskClock();
       if (stopping) throw new Error("organization runtime control host has been stopped");
       if (!expectedToken?.trim()) throw new Error("required control token is missing or blank");
       const opened = await WakeAcceptanceStore.open(options.acceptanceStorePath, options.storeOptions);
@@ -162,7 +164,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
           schedules = createScheduleController({ acceptanceStorePath: options.acceptanceStorePath, agents: config.agents, ...options.scheduleOptions,
             accept: async (occurrence) => {
               if (dispatcher?.busy(occurrence.agentId) || hardReason() || drainedSince !== undefined) return false;
-              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: occurrence.occurredAt } });
+              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: taskClockTimestamp(occurrence.occurredAt, clock) } });
               return result.state === "accepted";
             }
           });

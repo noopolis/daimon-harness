@@ -39,6 +39,66 @@ current-user-owned, and not unsafe through symlinks or writable permissions.
 The control token is named by `host.controlTokenEnv`; only the variable name is
 stored in config. HTTP requests use `Authorization: Bearer <token>`.
 
+## Task clock environment
+
+Set `NOOPOLIS_TASK_CLOCK` before startup to consume the ecosystem task clock:
+
+```json
+{"version":"noopolis.task-clock.v1","origin":"2024-02-29T12:00:00+02:00","anchorEpochMs":1800000000000}
+```
+
+Task time advances as `Date.parse(origin) + (Date.now() - anchorEpochMs)`.
+The origin must be a valid ISO-8601 instant with `Z` or an explicit offset;
+the anchor must be a safe integer. Invalid JSON, missing or unknown fields,
+wrong versions, invalid dates, offset-less origins and invalid anchors refuse
+startup with a `NOOPOLIS_TASK_CLOCK` error. An empty value is invalid, not unset.
+Unset preserves existing behavior.
+
+This is an environment-only option shared by the organization runtime and the
+standalone Pi harness. It adds no public config field or callback and no
+compiler dependency. Keep the process environment fixed for the runtime's
+lifetime; a different clock requires restarting it.
+
+Daimon forwards the original JSON bytes to engine CLI and MCP stdio children,
+Pi bash tools and Moltnet CLI children. It also derives `MNEME_CLOCK_ORIGIN`
+and `MNEME_CLOCK_ANCHOR_MS` from that same origin and anchor. It never resets
+the anchor when a process starts. Any conflicting server-declared value of
+these three variables refuses startup, including declarations for remote MCP
+servers; matching values are allowed. This prevents silent clock divergence.
+Remote MCP services must be launched with the same contract by their owner;
+Daimon cannot set another service's process environment.
+
+In-process memory requires Mneme's root `createOffsetClock` export and
+`createMemoryRuntime({ clock })` support. Daimon detects that export in one
+adapter and passes its epoch-ms clock to the memory runtime. A configured
+clock with an older Mneme refuses startup and names both required capabilities.
+The dependency version is unchanged. Memory policy and storage remain Mneme's.
+
+The current native Grok broker has a fixed worker environment without clock
+propagation. Task-clock runs using that broker refuse startup explicitly;
+they require a separate native broker contract/artifact update. Direct engine
+CLI children receive the three variables through the normal CLI environment.
+
+Daimon does not add ambient `FAKETIME`, `FAKETIME_DONT_FAKE_MONOTONIC` or
+`LD_PRELOAD` forwarding to its positive CLI/MCP environment. Existing inherited
+environments (Pi bash and Moltnet) keep their previous policy. The contract
+does not patch `Date`, OS clocks or arbitrary executables: child processes
+must consume it, and OS-level clock virtualization remains caller-owned.
+
+| Time surface | Clock / treatment |
+| --- | --- |
+| Final wake prompt, including memory, world, dream and direct-memory example wakes (`piAgentHandle`, `prompts`, `jungianPlayAgent`) | Current advancing task time is prepended when configured. |
+| Mneme prompts, memory tools, recall and storage | Mneme receives `clock`; Daimon does not rewrite memory data. |
+| Native schedule occurrence shown in attention prompt / `daimon_inbox` (`organizationRuntimeControl`) | Convert the real occurrence to task time at delivery creation. |
+| Incoming wake/inbox `occurred_at` | Producer-owned event time, preserved; producers must use the task clock for newly generated events. Never apply the offset twice. |
+| Replayed `moltnet_send` receipt `at` (`productionAgentTools`) | Convert the stored real timestamp to task time for both model-visible result channels. |
+| `moltnet_read`, external MCP results, world ticks | Historical/external payloads remain verbatim; clock-aware external tools own their current timestamps. |
+| Schedule due times, sleeps, wake/CLI/MCP/world deadlines, auth expiry, claim leases, retention, fuses, latency | Real time, unchanged. Fuse epoch and delivery identifiers remain opaque identifiers. |
+| Activity/health (`organizationRuntimeHost`, `piAgentHandle`), drain state (`organizationRuntimeControl`) | Real operational bookkeeping on control APIs. |
+| Acceptance receipts/reconciliation (`wakeAcceptanceStore`, `wakeAcceptanceReconciliation`), tool receipts (`productionAgentTools`), schedule state (`schedule`), fuse admissions/trips (`wakeFuse`) | Real timestamps on disk; model-visible projections are classified above. |
+| Usage/request/inference/seal ledgers (`turnUsageLedger`, `turnRequestLedger`, `inferenceUsageLedger`, `grokEngineBrokerLedger`, `engineBrokerSealLedger`); broker request timings (`grokBrokerTurnMeter`) | Real accounting and latency measurements. |
+| Pi session event timestamps (`cliSession`), turn traces (`turnTrace`), raw training captures (`rawTrainingCapture`), world trajectories (`worldTrajectory`), causal telemetry (`causalEvents`) | Real diagnostic bookkeeping, unchanged. |
+
 Runtime endpoints:
 
 - `GET /healthz` is unauthenticated process health.

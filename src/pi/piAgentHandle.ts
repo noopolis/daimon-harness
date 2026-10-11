@@ -1,6 +1,6 @@
 import type { AgentHandle, AgentStatus, WakeEvent, WakeResult } from "../core/types.js";
 import { createTrustedPiMemoryToolContext, type PiMemoryToolContextRef } from "./memoryTools.js";
-import { formatWakePrompt, preserveModelFacingWakeIdentity } from "./prompts.js";
+import { formatWakePrompt, preserveModelFacingWakeIdentity, withTaskClockPrompt } from "./prompts.js";
 import {
   stampTurnInputSubmitted,
   stampTurnOutputCompleted,
@@ -17,20 +17,8 @@ import { formatDreamPrompt } from "./wakeModes.js";
 import { createPiRawTrainingCapture, type PiRawTrainingCapture, type PiRawTrainingCaptureOptions, type PiRawTrainingCaptureRef } from "./rawTrainingCapture.js";
 import { formatWorldWakePrompt, worldWakeContext, type PiWorldToolContextRef } from "./worldNudge.js";
 import { createPiWorldTrajectoryCapture, type PiWorldTrajectoryIdentity } from "./worldTrajectory.js";
-import {
-  cloneWakeEvent,
-  disposePiSession,
-  persistPiTurnArtifacts,
-  PiWakeDeliveryQueue,
-  selectPiSessionForWake,
-  subscribeToPiTurnEvents,
-  type PiNativeSessionCreator,
-  type PiSession,
-  type PiSessionCreator,
-  type PiSessionLike,
-  type PiWakeEnvironmentContextRef,
-  type WakeSessionSelection
-} from "./piAgentWakeSupport.js";
+import { cloneWakeEvent, disposePiSession, persistPiTurnArtifacts, PiWakeDeliveryQueue, selectPiSessionForWake, subscribeToPiTurnEvents } from "./piAgentWakeSupport.js";
+import type { PiNativeSessionCreator, PiSession, PiSessionCreator, PiSessionLike, PiWakeEnvironmentContextRef, WakeSessionSelection } from "./piAgentWakeSupport.js";
 import { readMemoryContext, type MemoryPrepareTurnResult, type MemoryRuntime } from "@noopolis/mneme";
 export type { PiSession, PiSessionLike, PiSessionCreator, PiNativeSessionCreator } from "./piAgentWakeSupport.js";
 export type WakeAcceptanceInput = { runWake?: typeof stampTurnInputSubmitted; completeTurn?: typeof stampTurnOutputCompleted; traceTurn?: typeof persistPiTurnTrace; createWakeAcceptance?: (runtimeHomePath: string, agentId: string) => WakeAcceptanceStoreLike; causalRunId?: string; };
@@ -95,17 +83,12 @@ export class PiAgentHandle implements AgentHandle {
     this.stampTurnOutputCompleted = dependencies.completeTurn ?? stampTurnOutputCompleted;
     this.persistTrace = dependencies.traceTurn ?? persistPiTurnTrace;
     this.causalRunId = dependencies.causalRunId;
-    const wakeAcceptance =
-      dependencies.createWakeAcceptance?.(runtimeHomePath, id) ??
-      new WakeAcceptanceStore(runtimeHomePath, id, undefined, this.causalRunId);
+    const wakeAcceptance = dependencies.createWakeAcceptance?.(runtimeHomePath, id) ?? new WakeAcceptanceStore(runtimeHomePath, id, undefined, this.causalRunId);
     this.wakeDeliveryQueue = new PiWakeDeliveryQueue(id, wakeAcceptance);
   }
   async wake(event: WakeEvent): Promise<WakeResult> {
     const wakeEvent = cloneWakeEvent(event);
-    return this.wakeDeliveryQueue.wake(
-      wakeEvent,
-      (queuedEvent, transition) => this.runWake(queuedEvent, transition)
-    );
+    return this.wakeDeliveryQueue.wake(wakeEvent, (queuedEvent, transition) => this.runWake(queuedEvent, transition));
   }
   private async runWake(
     event: WakeEvent,
@@ -216,6 +199,7 @@ export class PiAgentHandle implements AgentHandle {
       if (selectedSession.mode === "dream") {
         promptText = formatDreamPrompt(promptText, selectedSession.threadId);
       }
+      promptText = withTaskClockPrompt(promptText);
       stage = "causal_input";
       const turnInput = await this.stampTurnInputSubmitted({
         runId: this.causalRunId,

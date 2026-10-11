@@ -2,7 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { WakeEvent } from "../core/types.js";
-import { createMemoryRuntime } from "@noopolis/mneme";
+import { createClockedMemoryRuntime } from "../pi/memoryClock.js";
+import { withTaskClockPrompt } from "../pi/prompts.js";
 import type { MemoryRecallAudit, MemoryRuntime } from "@noopolis/mneme";
 import { runEngineDetailed, type CliEngineKind as EngineKind, type EngineRunResult } from "../pi/cliSession.js";
 
@@ -45,7 +46,7 @@ export class JungianVoice {
   constructor(readonly config: JungianVoiceConfig) {
     this.workspacePath = path.join(config.runtimeRoot, "selves", config.selfId, "voices", config.id, "workspace");
     this.runtimeHomePath = path.join(config.runtimeRoot, "selves", config.selfId, "voices", config.id, "runtime");
-    this.memory = createMemoryRuntime({
+    this.memory = createClockedMemoryRuntime({
       agentId: config.id,
       runtimeHomePath: this.runtimeHomePath,
       source: `daimon/jungian-play/${config.engine}`,
@@ -86,7 +87,7 @@ export class JungianVoice {
       context: event.context ?? {}
     });
     const memoryPrepareMs = Date.now() - prepareStartedAt;
-    const promptText = [
+    const promptText = withTaskClockPrompt([
       `${this.config.name} (${this.config.id})`,
       `Self: ${this.config.selfName} (${this.config.selfId})`,
       `Role: ${this.config.archetype ?? "Representative Self"}`,
@@ -99,7 +100,7 @@ export class JungianVoice {
       "",
       "Current wake:",
       event.text
-    ].join("\n");
+    ].join("\n"));
 
     const engineResult = await runEngineDetailed(this.config.engine, promptText, {
       runtimeHomePath: this.runtimeHomePath,

@@ -8,6 +8,13 @@ import {
 } from "@noopolis/mneme";
 
 import type { AgentStartInput, WakeEvent } from "../core/types.js";
+import { readTaskClock } from "../runtime/taskClock.js";
+
+/** Applied after memory/world/dream formatting so every wake has the same task clock. */
+export function withTaskClockPrompt(prompt: string): string {
+  const clock = readTaskClock();
+  return clock === undefined ? prompt : `Current task time: ${new Date(clock.now()).toISOString()}\n\n${prompt}`;
+}
 
 export const formatWakePrompt = (event: WakeEvent): string => `Wake event:
 - id: ${event.id}

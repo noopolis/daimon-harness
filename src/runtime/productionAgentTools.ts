@@ -16,6 +16,7 @@ import { McpToolCallError, MCP_TOOL_RESULT_MAX_BYTES, renderMcpToolResult, repla
 import { ensureRuntimeHomeDirectory } from "./runtimeHomeLayout.js";
 import { capToolResult, resolveExemptToolNames, resolveToolResultMaxBytes, TOOL_OUTPUT_DIRECTORY_NAME } from "./toolResultSpill.js";
 import { cliChildEnvironment } from "../pi/cliEnvironment.js";
+import { taskClockChildEnvironment, taskClockTimestamp } from "./taskClock.js";
 import type { PiWakeEnvironmentContextRef } from "../pi/piAgentWakeSupport.js";
 
 const MAX_RESULT = 65_536; const TIMEOUT = 10_000;
@@ -32,6 +33,8 @@ const MAX_RESULT = 65_536; const TIMEOUT = 10_000;
 const DAIMON_ACTION_ID_PREFIX = "daimon-";
 
 export async function createProductionAgentTools(agent: OrganizationRuntimeAgentConfig, wakeContext: PiWakeEnvironmentContextRef = {}): Promise<ToolDefinition[]> {
+  taskClockChildEnvironment();
+  for (const server of agent.mcp ?? []) taskClockChildEnvironment(server.env);
   await ensureRuntimeHomeDirectory(agent.runtimeHomePath, "tool-state");
   // Resolved once, at agent start: a malformed bound is a configuration error
   // that should refuse the agent, not a surprise thrown from the middle of a
@@ -178,7 +181,7 @@ function moltnetTool(agent: OrganizationRuntimeAgentConfig, wakeContext: PiWakeE
       const [kind, target] = input.target.split(":", 2); if ((kind === "room" && !network.rooms.includes(target ?? "")) || (kind === "dm" && !network.dms) || !target || !["room", "dm"].includes(kind ?? "")) throw new Error("Moltnet target is not declared");
       if (!wakeContext.current) throw new Error("Moltnet send requires an active wake");
       const deliveryId = `${DAIMON_ACTION_ID_PREFIX}${createHash("sha256").update(JSON.stringify([wakeContext.current, agent.id, input.network, input.target, input.text])).digest("hex")}`;
-      const prior = await priorReceipt(agent, deliveryId); if (prior !== undefined) { wakeContext.spokeFor = wakeContext.current; return { content: [{ type: "text", text: JSON.stringify(prior) }], details: prior }; }
+      const prior = await priorReceipt(agent, deliveryId); if (prior !== undefined) { wakeContext.spokeFor = wakeContext.current; const visible = typeof prior.at === "string" ? { ...prior, at: taskClockTimestamp(prior.at) } : prior; return { content: [{ type: "text", text: JSON.stringify(visible) }], details: visible }; }
       const response = await machine(agent.moltnet!.cliPath, agent.moltnet!.configPath, input.network, { version: "moltnet.machine.v1", correlation_id: deliveryId, operation: "send_nudge", send_nudge: { delivery_id: deliveryId, target: { kind, id: target }, body: input.text } });
       const result = moltnetOperationResult(response, "send_nudge", "send") as { accepted?: boolean; message_id?: string } | undefined; if (result?.accepted !== true || typeof result.message_id !== "string") throw new Error("Moltnet send was not accepted");
       await receipt(agent, { kind: "moltnet", agent_id: agent.id, engine: agent.engine.kind, delivery_id: deliveryId, network: input.network, target: input.target, message_id: result.message_id });
@@ -193,6 +196,7 @@ function moltnetTool(agent: OrganizationRuntimeAgentConfig, wakeContext: PiWakeE
 }
 
 async function connect(agent: OrganizationRuntimeAgentConfig, server: OrganizationRuntimeMcpServer): Promise<{ client: Client; close(): Promise<void> }> {
+  taskClockChildEnvironment(server.env);
   const client = new Client({ name: "daimon-production", version: "0.2.0" }); const headers: Record<string, string> = server.authSecretEnv === undefined ? {} : { authorization: `Bearer ${requiredSecret(server.authSecretEnv)}` };
   const transport = server.transport === "stdio"
     ? new StdioClientTransport({ command: server.command!, args: [...server.args], env: stringEnvironment({ ...server.env, ...cliChildEnvironment([], agent.runtimeHomePath, { executablePath: server.command }) }) })
@@ -216,8 +220,9 @@ async function priorReceipt(agent: OrganizationRuntimeAgentConfig, deliveryId: s
  * no longer cancel it.
  */
 async function machine(cli: string, config: string, network: string, request: unknown): Promise<Record<string, unknown>> {
+  const clockEnvironment = taskClockChildEnvironment();
   return await new Promise((resolve, reject) => {
-    const child = spawn(cli, ["machine", "--config", config, "--network", network], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(cli, ["machine", "--config", config, "--network", network], { stdio: ["pipe", "pipe", "pipe"], ...(Object.keys(clockEnvironment).length === 0 ? {} : { env: { ...process.env, ...clockEnvironment } }) });
     let output = "", error = "", settled = false;
     const settle = (action: () => void): void => { if (settled) return; settled = true; clearTimeout(timer); action(); };
     const timer = setTimeout(() => { child.kill("SIGKILL"); settle(() => reject(new Error("Moltnet machine timed out"))); }, TIMEOUT);

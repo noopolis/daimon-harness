@@ -22,6 +22,14 @@ import path from "node:path";
 const text = (value) => ({ content: [{ type: "text", text: value }] });
 
 const TOOLS = {
+  task_clock: {
+    description: "Reports only the task clock environment",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    call: () => ({ structuredContent: Object.fromEntries([
+      "NOOPOLIS_TASK_CLOCK", "MNEME_CLOCK_ORIGIN", "MNEME_CLOCK_ANCHOR_MS",
+      "FAKETIME", "FAKETIME_DONT_FAKE_MONOTONIC", "LD_PRELOAD"
+    ].filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]])) })
+  },
   /** Content only, and the original fixture's behaviour, unchanged. */
   checkpoint: {
     description: "Records one bounded checkpoint",

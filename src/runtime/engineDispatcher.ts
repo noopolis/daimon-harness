@@ -1,4 +1,6 @@
 import { attentionTools, type AttentionRegistry } from "./attention.js";
+import { readTaskClock } from "./taskClock.js";
+import { memoryClockOptions } from "../pi/memoryClock.js";
 import { grokDaimonToolName, grokMountedToolNamingRule } from "../contracts/grokWorkerContract.js";
 import path from "node:path";
 
@@ -33,6 +35,9 @@ export async function startOrganizationRuntimeEngine(
   sharedProtectedPaths: readonly string[] = [],
   attention?: AttentionRegistry
 ): Promise<AgentHandle> {
+  const clock = readTaskClock();
+  if (agent.memory !== undefined) memoryClockOptions(clock);
+  if (clock !== undefined && agent.engine.kind === "grok" && grokBroker !== undefined) throw new Error("NOOPOLIS_TASK_CLOCK requires task-clock environment support in the native Grok engine broker; this broker does not support it");
   // A declared Grok model is enforced by the broker proxy and worker config;
   // the direct path has neither, so it refuses rather than silently ignoring it.
   if (agent.engine.kind === "grok" && agent.engine.model !== undefined && grokBroker === undefined) throw new Error(`Agent ${agent.id} declares a Grok model, which requires the engine broker`);

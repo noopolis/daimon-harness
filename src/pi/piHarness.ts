@@ -10,7 +10,7 @@ import {
   SettingsManager,
   type ToolDefinition
 } from "@earendil-works/pi-coding-agent";
-import { createMemoryRuntime, type MemoryAuthorityConfig } from "@noopolis/mneme";
+import type { createMemoryRuntime, MemoryAuthorityConfig } from "@noopolis/mneme";
 
 import type { AgentHandle, AgentHarnessAdapter, AgentStartInput, HarnessModelSpec } from "../core/types.js";
 import { resolveRunId } from "../observability/causalEvents.js";
@@ -25,6 +25,8 @@ import { DAIMON_WAKE_ID_ENV } from "./cliEnvironment.js";
 import { createPiWorldTools, piWorldToolNames, type PiWorldBinding } from "./worldTools.js";
 import type { PiWorldToolContextRef } from "./worldNudge.js";
 import { ensureRuntimeHome, ensureRuntimeHomeDirectory } from "../runtime/runtimeHomeLayout.js";
+import { readTaskClock, taskClockChildEnvironment } from "../runtime/taskClock.js";
+import { createClockedMemoryRuntime, memoryClockOptions } from "./memoryClock.js";
 import {
   bindPiRawTrainingCapture,
   validatePiRawTrainingCaptureOptions,
@@ -99,6 +101,8 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
   }
 
   async startAgent(input: AgentStartInput): Promise<AgentHandle> {
+    const taskClock = readTaskClock();
+    if (this.options.memory !== undefined) memoryClockOptions(taskClock);
     if (input.causalRunId !== undefined && this.options.memory !== undefined) {
       throw new Error("Per-agent causalRunId requires a memory runtime with explicit causal context; configured memory is currently unsupported");
     }
@@ -122,7 +126,7 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
     }
     const memory = this.options.memory === undefined
       ? undefined
-      : createMemoryRuntime({
+      : createClockedMemoryRuntime({
         agentId: input.id,
         authority: this.options.memory.authority,
         embeddingProvider: this.options.memory.embeddingProvider,
@@ -131,7 +135,7 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
         tokenBudget: this.options.memory.tokenBudget
       } as Parameters<typeof createMemoryRuntime>[0] & {
         embeddingProvider?: HarnessMemoryEmbeddingProvider;
-      });
+      }, taskClock);
     const memoryToolContext: PiMemoryToolContextRef | undefined =
       memory === undefined ? undefined : {};
     const worldToolContext: PiWorldToolContextRef | undefined =
@@ -165,9 +169,9 @@ export class PiHarnessAdapter implements AgentHarnessAdapter {
         ...(this.options.world === undefined ? [] : [this.options.world.tokenEnv])
       ])];
       const requestedTools = this.options.toolNames ?? input.tools;
-      const protectedBash = protectedNames.length === 0 || requestedTools?.includes("bash") === false
+      const protectedBash = (protectedNames.length === 0 && taskClock === undefined) || requestedTools?.includes("bash") === false
         ? []
-        : [createProtectedBashTool(input.workspacePath, input.runtimeHomePath, protectedNames, wakeEnvironmentContext)];
+        : [createProtectedBashTool(input.workspacePath, input.runtimeHomePath, protectedNames, wakeEnvironmentContext, taskClockChildEnvironment({}, taskClock))];
       const toolNames = [
         ...(requestedTools ?? ["read", "write", "edit", "bash", "grep", "find", "ls"]),
         ...piMemoryToolNames(memoryTools),
@@ -271,7 +275,8 @@ function createProtectedBashTool(
   workspacePath: string,
   runtimeHomePath: string,
   protectedNames: readonly string[],
-  wakeEnvironmentContext: PiWakeEnvironmentContextRef
+  wakeEnvironmentContext: PiWakeEnvironmentContextRef,
+  clockEnvironment: Record<string, string>
 ): ToolDefinition {
   const bash = createBashTool(workspacePath, {
     spawnHook: (context) => ({
@@ -284,6 +289,7 @@ function createProtectedBashTool(
         XDG_STATE_HOME: `${runtimeHomePath}/.local/state`,
         XDG_CACHE_HOME: `${runtimeHomePath}/.cache`,
         TMPDIR: `${runtimeHomePath}/.tmp`,
+        ...clockEnvironment,
         ...(wakeEnvironmentContext.current === undefined
           ? {}
           : { [DAIMON_WAKE_ID_ENV]: wakeEnvironmentContext.current })
