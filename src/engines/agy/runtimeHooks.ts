@@ -4,6 +4,7 @@ import { prepareEngineExecutable, prepareEngineReadiness, verifyAgySubscriptionE
 import { recordTurnUsage, resolveTurnUsageLedgerPath } from "../../runtime/turnUsageLedger.js";
 import { bareMountedToolNamingRule, type RuntimeEngineHooks } from "../runtimeHooks.js";
 import { startAgySubscriptionRealm } from "./agySubscriptionRealm.js";
+import { recordAgyTurnRequests } from "./agyTurnRequests.js";
 
 export const agyRuntimeHooks: RuntimeEngineHooks = {
   cliCommandKind: "agy-login",
@@ -46,7 +47,11 @@ export const agyRuntimeHooks: RuntimeEngineHooks = {
       maxToolTurns: AGY_MAX_TOOL_TURNS,
       timeoutMs: 180_000,
       dbusSessionBusAddress: agyBusAddress,
-      onTurnUsage: (usage, outcome) => recordTurnUsage(resolveTurnUsageLedgerPath(), { agent: agent.id, wake: wakeEnvironmentContext.current ?? "wake", engine: "agy", usage, outcome })
+      onTurnUsage: async (usage, outcome) => {
+        const wake = wakeEnvironmentContext.current ?? "wake";
+        await recordTurnUsage(resolveTurnUsageLedgerPath(), { agent: agent.id, wake, engine: "agy", usage, outcome });
+        if ("requests" in usage && usage.requests !== undefined) await recordAgyTurnRequests({ agent: agent.id, wake, requests: usage.requests });
+      }
     };
   },
   runtimeToolName: (name) => name,

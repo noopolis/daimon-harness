@@ -37,7 +37,8 @@ test("the live plain fixture decodes to the measured turn", () => {
     // (the frame's own `total_tokens` is 13,796 = input + output), so adding it
     // would double-count.
     total: 13_796,
-    calls: 1, notionalUsd: 0, complete: true
+    calls: 1, notionalUsd: 0, complete: true,
+    requests: [{ input: 13_722, cacheRead: 0, output: 74, total: 13_796, toolCalls: [] }]
   });
 });
 
@@ -47,10 +48,12 @@ test("the live tool fixture reports the whole turn, not just its last step", () 
   // The terminal frame's usage is the sum over the turn's model steps
   // (14,579 + 15,079 + 15,279 input), not the final step's 15,279. Reading a
   // `step_update` frame instead would under-report a tool-using wake threefold.
-  assert.deepEqual(decoded.usage, {
+  const { requests, ...total } = decoded.usage!;
+  assert.deepEqual(total, {
     input: 44_937, output: 444, cacheRead: 0, cacheWrite: 0,
     total: 45_381, calls: 1, notionalUsd: 0, complete: true
   });
+  assert.equal(requests?.length, 3);
 });
 
 test("one tool call costs AGY roughly three times a tool-free turn", () => {
