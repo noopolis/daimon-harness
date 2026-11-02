@@ -768,6 +768,12 @@ is swallowed, because instrumentation must never fail a wake. The existing
 ledger's version, path, and field list are untouched, so Spawnfile's
 `v`-pinned reader is unaffected.
 
+AGY rows come from its own `stream-json` progress frames
+(`../engines/agy/agyTurnRequests.ts`): one row per `agent_response` step, with
+`tool_calls` naming the `tool` steps that model step started. Any frame the
+decoder cannot account for drops `tool_calls` from every row of the turn, so an
+unknown frame reads as "no evidence", never as "no tools".
+
 Each Grok row also carries `tool_calls`: the tool-call NAMES that request's
 response carried, read by the proxy from the body it already buffers for usage
 (`parseGrokResponseToolNames` in `grokBrokerTurnMeter.ts`). Timings and tokens

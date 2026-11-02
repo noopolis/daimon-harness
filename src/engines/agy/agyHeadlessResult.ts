@@ -1,3 +1,5 @@
+import { decodeAgyStepRequests, type AgyStepRequest } from "./agyTurnRequests.js";
+
 type JsonRecord = Readonly<Record<string, unknown>>;
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -48,6 +50,8 @@ export type AgyTurnUsage = Readonly<{
   calls: number;
   notionalUsd: number;
   complete: boolean;
+  /** Per-model-step rows for `requests.jsonl` (`agyTurnRequests.ts`); absent when the steps were not decodable. */
+  requests?: readonly AgyStepRequest[];
 }>;
 
 export type AgyHeadlessTurn = Readonly<{ text: string; usage?: AgyTurnUsage }>;
@@ -116,11 +120,12 @@ export const decodeAgyHeadlessTurn = (output: string): AgyHeadlessTurn => {
   const lines = output.split(/\r?\n/).filter((line) => line.length > 0);
   if (lines.length === 0) throw invalidResult("empty stream");
   let result: JsonRecord | undefined;
+  const progress: JsonRecord[] = [];
   for (const [index, line] of lines.entries()) {
     let frame: unknown;
     try { frame = JSON.parse(line); } catch { throw invalidResult("invalid JSON"); }
     if (!isRecord(frame) || typeof frame.event !== "string") throw invalidResult("invalid event");
-    if (frame.event !== "result") continue;
+    if (frame.event !== "result") { progress.push(frame); continue; }
     if (index !== lines.length - 1) throw invalidResult("non-terminal result");
     if (!isRecord(frame.result)) throw invalidResult("invalid result event");
     result = frame.result;
@@ -129,7 +134,9 @@ export const decodeAgyHeadlessTurn = (output: string): AgyHeadlessTurn => {
   if (result.status !== "SUCCESS") throw invalidResult("unsuccessful result");
   if (typeof result.response !== "string" || result.response.trim().length === 0) throw invalidResult("empty response");
   const usage = decodeAgyTurnUsage(result);
-  return usage === undefined ? { text: result.response.trim() } : { text: result.response.trim(), usage };
+  if (usage === undefined) return { text: result.response.trim() };
+  const requests = decodeAgyStepRequests(progress);
+  return { text: result.response.trim(), usage: requests === undefined ? usage : { ...usage, requests } };
 };
 
 /** Text-only view of {@link decodeAgyHeadlessTurn}, for callers that do not meter. */
