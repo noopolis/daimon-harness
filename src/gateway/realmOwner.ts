@@ -55,6 +55,8 @@ export type RealmOwnerOptions<Login> = Readonly<{
   /** Minimum gap between proactive (pre-expiry) refresh attempts; rejection refreshes are never throttled. */
   proactiveRefreshIntervalMs?: number;
   writeBackRetryMs?: number;
+  /** Test-only: the first bearer request refreshes the login whatever its expiry (`DAIMON_GATEWAY_TEST_FORCE_REFRESH=1`). */
+  forceRefreshOnce?: boolean;
   log?: (line: string) => void;
 }>;
 
@@ -68,6 +70,7 @@ export async function createRealmOwner<Login, Extra extends object>(
   const now = options.now ?? Date.now;
   const skew = options.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
   const interval = options.proactiveRefreshIntervalMs ?? 0;
+  let forced = options.forceRefreshOnce === true;
   const log = options.log ?? ((line: string) => { process.stderr.write(`${line}\n`); });
   const authority = options.authority;
   const bytes = await authority.read();
@@ -141,6 +144,13 @@ export async function createRealmOwner<Login, Extra extends object>(
       if (pending !== undefined) await flush();
       if (inflight !== undefined) return inflight.catch(() => { if (stale) throw new RealmAuthStale(); return current(); });
       const expiry = codec.expiryMs(login);
+      if (forced) {
+        forced = false;
+        const before = generation;
+        const bearer = await refreshOnce().catch(() => { if (stale) throw new RealmAuthStale(); return current(); });
+        log(`daimon gateway: ${codec.label} forced refresh ${generation > before ? "rotated the login" : "left the login unchanged"}`);
+        return bearer;
+      }
       if (expiry === undefined || expiry - now() > skew || now() - lastProactive < interval) return current();
       lastProactive = now();
       try { return await refreshOnce(); } catch {
