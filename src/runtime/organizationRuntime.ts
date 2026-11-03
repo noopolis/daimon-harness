@@ -13,6 +13,7 @@ import {
   ORGANIZATION_RUNTIME_MAX_STRING_BYTES,
   ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS,
   ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES,
+  ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING,
   ORGANIZATION_RUNTIME_MAX_SCHEDULE_INTERVAL_MS,
   ORGANIZATION_RUNTIME_MAX_SCHEDULE_JITTER_SECONDS,
   ORGANIZATION_RUNTIME_V2_VERSION,
@@ -30,6 +31,7 @@ export {
   ORGANIZATION_RUNTIME_MAX_STRING_BYTES,
   ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS,
   ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES,
+  ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING,
   ORGANIZATION_RUNTIME_MAX_SCHEDULE_INTERVAL_MS,
   ORGANIZATION_RUNTIME_MAX_SCHEDULE_JITTER_SECONDS,
   ORGANIZATION_RUNTIME_V2_VERSION,
@@ -55,7 +57,7 @@ export type OrganizationRuntimeSchedule =
   | Readonly<{ kind: "every"; interval_ms: number; prompt: string; jitter_seconds?: number }>
   | Readonly<{ kind: "cron"; cron: string; timezone: string; prompt: string; jitter_seconds?: number }>;
 export type OrganizationRuntimeAgentConfig = Readonly<{ id: string; name: string; instructions: string; workspacePath: string; runtimeHomePath: string; engine: OrganizationRuntimeEngineIntent; attention?: AttentionConfig; recording?: WakeMomentRecording; schedule?: OrganizationRuntimeSchedule; mcp?: readonly OrganizationRuntimeMcpServer[]; moltnet?: OrganizationRuntimeMoltnet; memory?: OrganizationRuntimeMemory }>;
-export type OrganizationRuntimeHostConfig = Readonly<{ bindHost: string; port: number; /** Variable name only; never secret configuration data. */ controlTokenEnv: string }>;
+export type OrganizationRuntimeHostConfig = Readonly<{ bindHost: string; port: number; /** Variable name only; never secret configuration data. */ controlTokenEnv: string; /** Wake text bound on the control API; absent means `ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES`. */ maxWakeTextBytes?: number }>;
 export type OrganizationRuntimeConfig = Readonly<{ version: typeof ORGANIZATION_RUNTIME_VERSION | typeof ORGANIZATION_RUNTIME_V2_VERSION; host: OrganizationRuntimeHostConfig; agents: readonly OrganizationRuntimeAgentConfig[] }>;
 export type OrganizationRuntimeLifecycleState = "starting" | "running" | "stopping" | "stopped";
 export type OrganizationRuntimeWakeEvent = Readonly<{ version: "noopolis.daimon.wake.v1"; id: string; kind: "manual" | "message" | "schedule" | "external"; text: string; occurredAt: string }>;
@@ -85,5 +87,6 @@ export {
   isOrganizationRuntimeConfig,
   parseOrganizationRuntimeConfig,
   parseOrganizationRuntimeWakeRequest,
-  validateOrganizationRuntimeConfig
+  validateOrganizationRuntimeConfig,
+  wakeTextLimit
 } from "./organizationRuntimeParsing.js";

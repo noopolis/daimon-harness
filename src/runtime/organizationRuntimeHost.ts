@@ -13,6 +13,7 @@ import {
 import {
   parseOrganizationRuntimeConfig,
   parseOrganizationRuntimeWakeRequest,
+  wakeTextLimit,
   type OrganizationRuntimeActivity,
   type OrganizationRuntimeActivityPage,
   type OrganizationRuntimeActivityRequest,
@@ -241,7 +242,7 @@ function createHost(
     const durable = consumeDurableAdmission(request);
     let parsed: OrganizationRuntimeWakeRequest;
     try {
-      parsed = parseOrganizationRuntimeWakeRequest(request);
+      parsed = parseOrganizationRuntimeWakeRequest(request, wakeTextLimit(config));
     } catch {
       return invalidRequest();
     }

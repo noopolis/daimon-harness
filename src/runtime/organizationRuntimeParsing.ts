@@ -9,6 +9,7 @@ import {
   ORGANIZATION_RUNTIME_MAX_STRING_BYTES,
   ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS,
   ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES,
+  ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING,
   ORGANIZATION_RUNTIME_MAX_SCHEDULE_INTERVAL_MS,
   ORGANIZATION_RUNTIME_MAX_SCHEDULE_JITTER_SECONDS,
   ORGANIZATION_RUNTIME_V2_VERSION,
@@ -34,9 +35,10 @@ export function parseOrganizationRuntimeConfig(value: unknown): OrganizationRunt
   const version = string(root.version, "config.version");
   if (version !== ORGANIZATION_RUNTIME_VERSION && version !== ORGANIZATION_RUNTIME_V2_VERSION) throw new TypeError("config.version is not supported");
   const hostValue = object(root.host, "config.host");
-  exact(hostValue, ["bindHost", "port", "controlTokenEnv"], "config.host");
+  exactOptional(hostValue, ["bindHost", "port", "controlTokenEnv"], ["maxWakeTextBytes"], "config.host");
   const host: OrganizationRuntimeHostConfig = {
-    bindHost: nonEmpty(hostValue.bindHost, "config.host.bindHost"), port: port(hostValue.port, "config.host.port"), controlTokenEnv: envName(hostValue.controlTokenEnv, "config.host.controlTokenEnv")
+    bindHost: nonEmpty(hostValue.bindHost, "config.host.bindHost"), port: port(hostValue.port, "config.host.port"), controlTokenEnv: envName(hostValue.controlTokenEnv, "config.host.controlTokenEnv"),
+    ...(hostValue.maxWakeTextBytes === undefined ? {} : { maxWakeTextBytes: wakeTextBound(hostValue.maxWakeTextBytes) })
   };
   const rawAgents = array(root.agents, "config.agents");
   if (rawAgents.length === 0 || rawAgents.length > ORGANIZATION_RUNTIME_MAX_AGENTS) throw new TypeError(`config.agents must contain between 1 and ${ORGANIZATION_RUNTIME_MAX_AGENTS} agents`);
@@ -53,7 +55,10 @@ export function parseOrganizationRuntimeConfig(value: unknown): OrganizationRunt
   return { version: version as OrganizationRuntimeConfig["version"], host, agents };
 }
 
-export function parseOrganizationRuntimeWakeRequest(value: unknown): OrganizationRuntimeWakeRequest {
+/** The wake text bound a parsed configuration admits on its control API. */
+export function wakeTextLimit(config: Pick<OrganizationRuntimeConfig, "host">): number { return config.host.maxWakeTextBytes ?? ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES; }
+
+export function parseOrganizationRuntimeWakeRequest(value: unknown, maxTextBytes = ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES): OrganizationRuntimeWakeRequest {
   const request = object(snapshot(value, "wake request"), "wake request");
   exact(request, ["token", "agentId", "event"], "wake request");
   const event = object(request.event, "wake request.event");
@@ -61,8 +66,9 @@ export function parseOrganizationRuntimeWakeRequest(value: unknown): Organizatio
   if (string(event.version, "wake request.event.version") !== "noopolis.daimon.wake.v1") throw new TypeError("wake request.event.version is not supported");
   const kind = string(event.kind, "wake request.event.kind");
   if (kind !== "manual" && kind !== "message" && kind !== "schedule" && kind !== "external") throw new TypeError("wake request.event.kind is not supported");
-  const text = string(event.text, "wake request.event.text");
-  if (Buffer.byteLength(text, "utf8") > ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES) throw new TypeError("wake request.event.text exceeds the wake text limit");
+  // A declared wider bound replaces the shared string bound for the wake text alone.
+  const text = typeof event.text === "string" && maxTextBytes > ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES ? event.text : string(event.text, "wake request.event.text");
+  if (Buffer.byteLength(text, "utf8") > maxTextBytes) throw new TypeError("wake request.event.text exceeds the wake text limit");
   return { token: request.token === undefined ? undefined : string(request.token, "wake request.token"), agentId: nonEmpty(request.agentId, "wake request.agentId"), event: { version: "noopolis.daimon.wake.v1", id: nonEmpty(event.id, "wake request.event.id"), kind, text, occurredAt: rfc3339(event.occurredAt) } };
 }
 
@@ -256,6 +262,7 @@ function string(value: unknown, label: string, maxCodepoints: number = ORGANIZAT
 function nonEmpty(value: unknown, label: string, maxCodepoints?: number): string { const result = string(value, label, maxCodepoints); if (!result.trim()) throw new TypeError(`${label} must not be empty`); return result; }
 function absolute(value: unknown, label: string): string { const result = nonEmpty(value, label); if (!path.posix.isAbsolute(result)) throw new TypeError(`${label} must be an absolute POSIX path`); const normalized = path.posix.normalize(result); if (normalized === "/") throw new TypeError(`${label} must not overlap filesystem root`); return normalized.replace(/\/+$/, ""); }
 function envName(value: unknown, label: string): string { const result = nonEmpty(value, label); if (!ENV_NAME.test(result)) throw new TypeError(`${label} must be a safe environment variable name`); return result; }
+function wakeTextBound(value: unknown): number { if (typeof value !== "number" || !Number.isInteger(value) || value < ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES || value > ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING) throw new TypeError(`config.host.maxWakeTextBytes must be an integer between ${ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES} and ${ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING}`); return value; }
 function port(value: unknown, label: string): number { if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65_535) throw new TypeError(`${label} must be an integer between 1 and 65535`); return value; }
 function size(value: unknown): void { const serialized = JSON.stringify(value); if (serialized === undefined || Buffer.byteLength(serialized, "utf8") > ORGANIZATION_RUNTIME_MAX_CONFIG_BYTES) throw new TypeError("config exceeds the runtime byte limit"); }
 function rfc3339(value: unknown): string { const result = nonEmpty(value, "wake request.event.occurredAt"); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(result) || Number.isNaN(Date.parse(result)) || new Date(result).toISOString() !== result) throw new TypeError("wake request.event.occurredAt must be an exact RFC3339 timestamp"); return result; }

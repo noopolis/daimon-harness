@@ -28,3 +28,9 @@ Rules:
   `*KEY*` names from model-run commands.
 
 Use named exports, keep files under 400 lines, tests beside files.
+
+`DAIMON_GATEWAY_TEST_FORCE_REFRESH=1` is a test-only hook: each realm owner
+refreshes its login on its first bearer request whatever the expiry, once, and
+logs `daimon gateway: <engine> forced refresh rotated the login` (or `left the
+login unchanged`). It exists so a pilot can prove a mid-run rotation through the
+gateway without anyone touching a login file. Production never sets it.

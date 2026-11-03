@@ -31,6 +31,8 @@ export async function runGatewayCli(arguments_: readonly string[]): Promise<Runn
   const realms: HeldRealm[] = [];
   const owners: RealmOwner<object>[] = [];
   let server: GatewayServer;
+  // Test-only: each realm refreshes once on its first request, to prove a mid-run rotation end to end.
+  const forceRefreshOnce = process.env.DAIMON_GATEWAY_TEST_FORCE_REFRESH === "1";
   try {
     // Each realm's exclusive flock is held for the gateway's whole life: a second gateway on a login fails here.
     let codex: Readonly<{ owner: CodexRealmOwner; upstreamBaseUrl?: string }> | undefined;
@@ -38,7 +40,7 @@ export async function runGatewayCli(arguments_: readonly string[]): Promise<Runn
     if (config.codex !== undefined) {
       const realm = await startCodexSubscriptionRealm(realmPaths(config.codex));
       realms.push(realm);
-      const owner = await createCodexRealmOwner({ authority: realm.authority, refresh: createCodexRefresh(config.codex.tokenUrl === undefined ? {} : { tokenUrl: config.codex.tokenUrl }) });
+      const owner = await createCodexRealmOwner({ authority: realm.authority, forceRefreshOnce, refresh: createCodexRefresh(config.codex.tokenUrl === undefined ? {} : { tokenUrl: config.codex.tokenUrl }) });
       owners.push(owner);
       codex = { owner, ...upstream(config.codex) };
     }
@@ -47,7 +49,7 @@ export async function runGatewayCli(arguments_: readonly string[]): Promise<Runn
       realms.push(realm);
       await sweepGrokRefreshScratch(config.grok.scratchPath);
       const refresh = createGrokRefresh({ command: config.grok.command ?? GROK_ENGINE_BROKER.grokExecutablePath, ...(config.grok.scratchPath === undefined ? {} : { scratchRoot: config.grok.scratchPath }) });
-      const owner = await createGrokRealmOwner({ authority: realm.authority, refresh });
+      const owner = await createGrokRealmOwner({ authority: realm.authority, forceRefreshOnce, refresh });
       owners.push(owner);
       grok = { owner, ...upstream(config.grok) };
     }

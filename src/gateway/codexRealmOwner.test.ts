@@ -124,3 +124,21 @@ test("owns the real portable realm: reads it, writes back the CLI schema, and fe
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a forced refresh rotates a fresh login once, shared by concurrent first requests", async () => {
+  const authority = memoryAuthority(tokens(0));
+  let calls = 0;
+  const lines: string[] = [];
+  const refresh: CodexRefresh = async () => { calls += 1; return tokens(1); };
+  const owner = await createCodexRealmOwner({ authority, refresh, forceRefreshOnce: true, log: (line) => lines.push(line) });
+  const [left, right] = await Promise.all([owner.bearer(), owner.bearer()]);
+  assert.deepEqual([left.generation, right.generation, calls], [1, 1, 1]);
+  assert.equal(authority.writes[0]!.refreshToken, "synthetic-refresh-1");
+  assert.equal((await owner.bearer()).generation, 1);
+  assert.equal(calls, 1);
+  assert.deepEqual(lines, ["daimon gateway: codex forced refresh rotated the login"]);
+  // Without the flag, an unexpired login never refreshes.
+  const unforced = await createCodexRealmOwner({ authority: memoryAuthority(tokens(0)), refresh, log: () => undefined });
+  assert.equal((await unforced.bearer()).generation, 0);
+  assert.equal(calls, 1);
+});

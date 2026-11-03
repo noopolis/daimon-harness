@@ -96,15 +96,18 @@ export type OrganizationRuntimeWakeAcceptanceResult = OrganizationRuntimeWakeAcc
   code: "unauthorized" | "invalid_request" | "unknown_agent" | "host_stopping" | "host_stopped" | "delivery_conflict";
 }>;
 
-export function parseWakeAcceptanceRequest(value: unknown): OrganizationRuntimeWakeAcceptanceRequest {
+/** A stored record holds its escaped wake text plus envelope; the bound scales with a declared wider text bound. */
+export function wakeAcceptanceRecordBytes(maxTextBytes = MAX_WAKE_ACCEPTANCE_BYTES): number { return Math.max(MAX_WAKE_ACCEPTANCE_RECORD_BYTES, maxTextBytes * 4); }
+
+export function parseWakeAcceptanceRequest(value: unknown, maxTextBytes = MAX_WAKE_ACCEPTANCE_BYTES): OrganizationRuntimeWakeAcceptanceRequest {
   const root = record(snapshot(value, "wake acceptance"), "wake acceptance");
   exact(root, ["token", "agent_id", "delivery_id", "event"], "wake acceptance");
   const event = record(root.event, "wake acceptance.event");
   exact(event, ["version", "kind", "text", "occurred_at"], "wake acceptance.event");
   const kind = text(event.kind, "wake acceptance.event.kind");
   if (kind !== "manual" && kind !== "message" && kind !== "schedule" && kind !== "external") throw new TypeError("wake acceptance.event.kind is not supported");
-  const body = text(event.text, "wake acceptance.event.text");
-  if (Buffer.byteLength(body, "utf8") > MAX_WAKE_ACCEPTANCE_BYTES) throw new TypeError("wake acceptance.event.text exceeds the wake text limit");
+  const body = text(event.text, "wake acceptance.event.text", maxTextBytes);
+  if (Buffer.byteLength(body, "utf8") > maxTextBytes) throw new TypeError("wake acceptance.event.text exceeds the wake text limit");
   if (text(event.version, "wake acceptance.event.version") !== WAKE_V2_VERSION) throw new TypeError("wake acceptance.event.version is not supported");
   return {
     token: root.token === undefined ? undefined : text(root.token, "wake acceptance.token"),
@@ -139,8 +142,8 @@ function record(value: unknown, label: string): Record<string, unknown> {
 function exact(value: Record<string, unknown>, expected: readonly string[], label: string): void {
   if (Object.keys(value).some((key) => !expected.includes(key)) || expected.some((key) => !Object.hasOwn(value, key))) throw new TypeError(`${label} must contain exactly ${expected.join(", ")}`);
 }
-function text(value: unknown, label: string): string {
-  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > MAX_WAKE_ACCEPTANCE_BYTES) throw new TypeError(`${label} must be a bounded string`);
+function text(value: unknown, label: string, maxBytes = MAX_WAKE_ACCEPTANCE_BYTES): string {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > maxBytes) throw new TypeError(`${label} must be a bounded string`);
   return value;
 }
 function nonBlank(value: unknown, label: string): string { const result = text(value, label); if (!result.trim()) throw new TypeError(`${label} must not be blank`); return result; }
