@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { createOrganizationRuntimeHost } from "./organizationRuntimeHost.js";
 import { createOrganizationRuntimeControlHost } from "./organizationRuntimeControl.js";
-import { parseOrganizationRuntimeConfig, parseOrganizationRuntimeWakeRequest } from "./organizationRuntime.js";
+import { parseOrganizationRuntimeConfig, parseOrganizationRuntimeWakeRequest, wakeTextLimit } from "./organizationRuntime.js";
 import { runEngineBrokerServiceCli } from "../engines/grok/broker/engineBrokerServiceCli.js";
 import { runGatewayCli } from "../gateway/gatewayCli.js";
 
@@ -36,7 +36,7 @@ export async function runOrganizationRuntimeCli(arguments_: readonly string[], e
   await host.start();
 
   const server = createServer((request, response) => {
-    void handleRequest(request, response, host, control, environment[config.host.controlTokenEnv]);
+    void handleRequest(request, response, host, control, environment[config.host.controlTokenEnv], wakeTextLimit(config));
   });
   try {
     if (environment[READINESS_RECEIPT_ENV]) await writeReadinessReceipt(environment[READINESS_RECEIPT_ENV]!, config);
@@ -99,7 +99,8 @@ async function handleRequest(
   response: import("node:http").ServerResponse,
   host: ReturnType<typeof createOrganizationRuntimeHost>,
   control: ReturnType<typeof createOrganizationRuntimeControlHost> | undefined,
-  expectedToken: string | undefined
+  expectedToken: string | undefined,
+  maxWakeTextBytes: number
 ): Promise<void> {
   try {
     const url = new URL(request.url ?? "/", "http://runtime.invalid");
@@ -109,7 +110,7 @@ async function handleRequest(
     if (!authorized(request, expectedToken)) return respond(response, 401, { error: "unauthorized" });
     if (request.method === "POST" && url.pathname === "/v1/wake") {
       if (request.headers["content-type"] !== "application/json") throw new TypeError("content-type must be application/json");
-      const result = await host.wake(parseOrganizationRuntimeWakeRequest({ ...bodyRecord(await readJson(request)), token: expectedToken }));
+      const result = await host.wake(parseOrganizationRuntimeWakeRequest({ ...bodyRecord(await readJson(request)), token: expectedToken }, maxWakeTextBytes));
       return respond(response, result.status === "completed" ? 200 : result.status === "failed" ? 502 : 409, result);
     }
     if (request.method === "GET" && url.pathname === "/v1/health") {

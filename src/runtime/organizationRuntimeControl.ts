@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readTaskClock } from "./taskClock.js";
-import { parseOrganizationRuntimeConfig, parseOrganizationRuntimeWakeRequest, type OrganizationRuntimeConfig, type OrganizationRuntimeHost, type OrganizationRuntimeShutdownCompletion } from "./organizationRuntime.js";
+import { parseOrganizationRuntimeConfig, parseOrganizationRuntimeWakeRequest, wakeTextLimit, type OrganizationRuntimeConfig, type OrganizationRuntimeHost, type OrganizationRuntimeShutdownCompletion } from "./organizationRuntime.js";
 import { createOrganizationRuntimeHostWithAttention } from "./organizationRuntimeHost.js";
 import { WakeFuse, type WakeBudgetSnapshot } from "./wakeFuse.js";
 import { AttentionDispatcher } from "./attentionDispatcher.js";
@@ -80,7 +80,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
   };
   const accept = async (value: unknown, nativeSchedule = false): Promise<OrganizationRuntimeWakeAcceptanceResult> => {
     let request;
-    try { request = parseWakeAcceptanceRequest(value); } catch { return rejected("invalid_request"); }
+    try { request = parseWakeAcceptanceRequest(value, wakeTextLimit(config)); } catch { return rejected("invalid_request"); }
     if (!tokensEqual(expectedToken, request.token)) return rejected("unauthorized");
     if (!knownAgents.has(request.agent_id)) return rejected("unknown_agent");
     // Check the operator latch before taking ownership, even between polls.
@@ -126,7 +126,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
 
   return {
     wake: async (request) => {
-      try { request = parseOrganizationRuntimeWakeRequest(request); } catch { return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: "", wakeId: "", code: "invalid_request" }; }
+      try { request = parseOrganizationRuntimeWakeRequest(request, wakeTextLimit(config)); } catch { return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: "", wakeId: "", code: "invalid_request" }; }
       // Attention and recording require durable ownership and dispatcher admission.
       if (!tokensEqual(expectedToken, request.token)) return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: request.agentId, wakeId: request.event.id, code: "unauthorized" };
       if (!knownAgents.has(request.agentId)) return { version: "noopolis.daimon.wake-result.v1", status: "rejected", agentId: request.agentId, wakeId: request.event.id, code: "unknown_agent" };
@@ -147,7 +147,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
       const clock = readTaskClock();
       if (stopping) throw new Error("organization runtime control host has been stopped");
       if (!expectedToken?.trim()) throw new Error("required control token is missing or blank");
-      const opened = await WakeAcceptanceStore.open(options.acceptanceStorePath, options.storeOptions);
+      const opened = await WakeAcceptanceStore.open(options.acceptanceStorePath, { ...options.storeOptions, maxWakeTextBytes: wakeTextLimit(config) });
       let openedFuse: WakeFuse | undefined;
       try {
         openedFuse = await WakeFuse.open({ organizationKey: [...knownAgents].sort().join("\u0000"), environment: options.fuseEnvironment, ...(options.fuseNowForTest === undefined ? {} : { now: options.fuseNowForTest }) });

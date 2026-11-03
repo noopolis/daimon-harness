@@ -26,12 +26,12 @@ export function publicAcceptance(record: StoredWakeAcceptanceRecord): Organizati
 export function publicStatus(record: StoredWakeAcceptanceRecord): OrganizationRuntimeWakeReceiptStatus {
   return { version: WAKE_RECEIPT_STATUS_VERSION, acceptance_id: record.acceptance_id, agent_id: record.agent_id, delivery_id: record.delivery_id, request_digest: record.request_digest, state: record.state, accepted_at: record.accepted_at, updated_at: record.updated_at, ...(record.execution_id === undefined ? {} : { execution_id: record.execution_id }), ...(record.deferred === undefined ? {} : { deferred: record.deferred }), ...(record.code === undefined ? {} : { code: record.code }), ...(record.text === undefined ? {} : { text: record.text }) };
 }
-export function parseStoredWakeAcceptance(value: unknown): StoredWakeAcceptanceRecord {
+export function parseStoredWakeAcceptance(value: unknown, maxTextBytes?: number): StoredWakeAcceptanceRecord {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("wake acceptance record is invalid");
   const record = value as Record<string, unknown>;
   const keys = ["acceptance_id", "agent_id", "delivery_id", "request_digest", "event", "state", "accepted_at", "updated_at", "claim_generation", "execution_id", "deferred", "execution_error", "code", "text", "native_schedule"];
   if (Object.keys(record).some((key) => !keys.includes(key))) throw new Error("wake acceptance record is invalid");
-  const parsed = parseWakeAcceptanceRequest({ token: undefined, agent_id: string(record.agent_id), delivery_id: string(record.delivery_id), event: record.event });
+  const parsed = parseWakeAcceptanceRequest({ token: undefined, agent_id: string(record.agent_id), delivery_id: string(record.delivery_id), event: record.event }, maxTextBytes);
   if (record.native_schedule !== undefined && (record.native_schedule !== true || parsed.event.kind !== "schedule")) throw new Error("wake acceptance schedule provenance is invalid");
   const state = string(record.state) as WakeReceiptState;
   if (!(["accepted", "running", "completed", "failed", "stopped"] as const).includes(state)) throw new Error("wake acceptance record is invalid");

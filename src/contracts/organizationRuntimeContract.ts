@@ -14,6 +14,12 @@ export const ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS = 4_096;
 /** Wider codepoint bound for agent `instructions` only; every other bounded string keeps the shared 4,096 cap. */
 export const ORGANIZATION_RUNTIME_MAX_INSTRUCTIONS_CODEPOINTS = 16_384;
 export const ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES = 16_384;
+/**
+ * Ceiling on `host.maxWakeTextBytes`, the organization's opt-in wider wake text
+ * bound on the control API. The default stays the 16,384 bytes above; an
+ * organization whose wakes carry whole documents (a training judge) declares more.
+ */
+export const ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING = 262_144;
 export const ORGANIZATION_RUNTIME_MAX_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 /**
  * Upper bound on `schedule.jitter_seconds`. Jitter exists to blur a wake's
@@ -54,7 +60,8 @@ export const ORGANIZATION_RUNTIME_CONFIG_SCHEMA = {
     host: { type: "object", additionalProperties: false, required: ["bindHost", "port", "controlTokenEnv"], properties: {
       bindHost: { type: "string", minLength: 1, maxLength: ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS, pattern: "\\S" },
       port: { type: "integer", minimum: 1, maximum: 65_535 },
-      controlTokenEnv: { type: "string", maxLength: ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }
+      controlTokenEnv: { type: "string", maxLength: ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
+      maxWakeTextBytes: { type: "integer", minimum: ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES, maximum: ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING }
     } },
     agents: { type: "array", minItems: 1, maxItems: ORGANIZATION_RUNTIME_MAX_AGENTS, items: {
       type: "object", additionalProperties: false, required: ["id", "name", "instructions", "workspacePath", "runtimeHomePath", "engine"], properties: {

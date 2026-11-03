@@ -5,7 +5,7 @@ import { link, lstat, open, readFile, readdir, realpath, rename, stat, unlink } 
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  MAX_WAKE_ACCEPTANCE_RECORD_BYTES,
+  wakeAcceptanceRecordBytes,
   parseWakeAcceptanceRequest,
   sanitizeWakeCompletionText,
   type OrganizationRuntimeWakeAcceptanceRequest,
@@ -24,7 +24,7 @@ type ActivityRow = OrganizationRuntimeWakeReceiptStatus & Readonly<{ active: boo
 export type WakeExecutionClaim = Readonly<{ acceptance_id: string; owner_id: string; generation: string; expires_at: string; acceptance_ids?: readonly string[]; execution_id?: string }>;
 export type WakeExecutionClaimResult = Readonly<{ state: "acquired"; claim: WakeExecutionClaim }> | Readonly<{ state: "held"; retry_at: string }> | Readonly<{ state: "terminal" }>;
 type DirectoryIdentity = Readonly<{ dev: number; ino: number; uid: number; mode: number }>;
-export type WakeAcceptanceStoreTestOptions = Readonly<{ claimTtlMs?: number; afterFinalLockAssertion?: () => Promise<void>; nowForTest?: () => number; ownerLiveness?: (lock: TransitionLock) => Promise<boolean>; processIdentity?: () => Promise<Omit<TransitionLock, "owner_id" | "generation">> }>;
+export type WakeAcceptanceStoreTestOptions = Readonly<{ /** The configured wake text bound; stored records admit it. */ maxWakeTextBytes?: number; claimTtlMs?: number; afterFinalLockAssertion?: () => Promise<void>; nowForTest?: () => number; ownerLiveness?: (lock: TransitionLock) => Promise<boolean>; processIdentity?: () => Promise<Omit<TransitionLock, "owner_id" | "generation">> }>;
 /** Deliberately absent from the public option type; adjacent tests control races and timing. */
 type InternalTestHooks = Readonly<{ afterInitialLeaseCheckForTest?: () => Promise<void>; onRecordReadForTest?: (file: string) => void; claimTransitionLockTimingForTest?: Parameters<typeof waitForClaimTransitionLock>[5] }>;
 const DEFAULT_CLAIM_TTL_MS = 240_000;
@@ -32,7 +32,7 @@ const DEFAULT_CLAIM_TTL_MS = 240_000;
 export class WakeAcceptanceStore {
   private mutations: Promise<void> = Promise.resolve();
   private readonly index: WakeAcceptanceIndex;
-  private onRecordRead?: (file: string) => void;
+  private onRecordRead?: (file: string) => void; private maxTextBytes?: number;
   private claimTransitionLockTiming?: Parameters<typeof waitForClaimTransitionLock>[5];
   private constructor(private readonly root: string, private readonly directory: Awaited<ReturnType<typeof open>>, private readonly identity: DirectoryIdentity, private readonly registration: StoreHostRegistration, private readonly claimTtlMs: number, private readonly now: () => number, private readonly owner: Omit<TransitionLock, "owner_id" | "generation">, private readonly ownerLiveness: (lock: TransitionLock) => Promise<boolean>, private readonly afterFinalLockAssertion?: () => Promise<void>) {
     this.index = new WakeAcceptanceIndex(root, { directoryStat: async () => await this.directory.stat({ bigint: true }), files: async () => await this.files(), readId: async (file) => (await this.read(file)).acceptance_id, fileStat: async (file) => await lstat(file, { bigint: true }).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; }) }, () => BigInt(this.now()) * 1_000_000n);
@@ -56,7 +56,7 @@ export class WakeAcceptanceStore {
       await pruneDeadHostRegistrations(real, directory, registration, options.ownerLiveness ?? processIsAlive);
       const store = new WakeAcceptanceStore(real, directory, identity(before), registration, claimTtlMs, options.nowForTest ?? Date.now, owner, options.ownerLiveness ?? processIsAlive, options.afterFinalLockAssertion);
       store.claimTransitionLockTiming = (options as WakeAcceptanceStoreTestOptions & InternalTestHooks).claimTransitionLockTimingForTest;
-      store.onRecordRead = (options as WakeAcceptanceStoreTestOptions & InternalTestHooks).onRecordReadForTest; return store;
+      store.onRecordRead = (options as WakeAcceptanceStoreTestOptions & InternalTestHooks).onRecordReadForTest; store.maxTextBytes = options.maxWakeTextBytes; return store;
     } catch (error) {
       await directory.close().catch(() => undefined);
       throw error;
@@ -309,11 +309,11 @@ export class WakeAcceptanceStore {
   private async readOptional(file: string): Promise<Stored | undefined> { try { return await this.read(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") { await this.verify(); return undefined; } throw error; } }
   private async read(file: string): Promise<Stored> {
     const entry = await lstat(file);
-    if (!entry.isFile() || entry.isSymbolicLink() || entry.uid !== process.getuid?.() || (entry.mode & 0o777) !== 0o600 || entry.size > MAX_WAKE_ACCEPTANCE_RECORD_BYTES) throw new Error("wake acceptance record is unsafe");
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.uid !== process.getuid?.() || (entry.mode & 0o777) !== 0o600 || entry.size > wakeAcceptanceRecordBytes(this.maxTextBytes)) throw new Error("wake acceptance record is unsafe");
     this.onRecordRead?.(file);
     const bytes = await readFile(file);
-    if (bytes.length > MAX_WAKE_ACCEPTANCE_RECORD_BYTES) throw new Error("wake acceptance record exceeds its bound");
-    return parseStoredWakeAcceptance(JSON.parse(bytes.toString("utf8")));
+    if (bytes.length > wakeAcceptanceRecordBytes(this.maxTextBytes)) throw new Error("wake acceptance record exceeds its bound");
+    return parseStoredWakeAcceptance(JSON.parse(bytes.toString("utf8")), this.maxTextBytes);
   }
   private async readClaimOptional(file: string): Promise<WakeExecutionClaim | undefined> { try { return await this.readClaim(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; } }
   private async readClaim(file: string): Promise<WakeExecutionClaim> {
