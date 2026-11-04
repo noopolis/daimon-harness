@@ -319,9 +319,17 @@ async function completedFromFinalReply(
     text: completed.text, workerPid: completed.workerPid, workerUid: completed.workerUid,
     workerStartTime: completed.workerStartTime, ...observation, ...accounting
   };
-  await finishBrokerTurnWithUsage(deps.turns, request, completed, metering, { notionalUsd: 0, complete: false, estimatedRequests: snapshot.estimatedRequests, requests: requestRows(undefined, snapshot) }, () => onSealed(result));
+  await finishBrokerTurnWithUsage(deps.turns, request, completed, metering, { notionalUsd: 0, complete: meterMeasuredEveryRequest(snapshot), estimatedRequests: snapshot.estimatedRequests, requests: requestRows(undefined, snapshot) }, () => onSealed(result));
   return result;
 }
+
+/**
+ * The proxy's account is the turn's whole account once every request it forwarded settled with
+ * the provider's own usage: no request in flight, none charged an estimate. Grok 1.0.34 never
+ * exits after its final reply, so this, not the worker's result frame, is how most turns end.
+ */
+const meterMeasuredEveryRequest = (snapshot: GrokBrokerTurnMeterSnapshot): boolean =>
+  snapshot.requests > 0 && snapshot.estimatedRequests === 0 && snapshot.timings.every((timing) => timing.endedAt !== undefined && timing.usage !== undefined);
 
 /** The proxy saw every forwarded request; the stream is the fallback when no request crossed this proxy. */
 const requestCount = (stream: GrokStreamUsage | undefined, snapshot: GrokBrokerTurnMeterSnapshot): number => snapshot.requests > 0 ? snapshot.requests : stream?.requests.length ?? 0;
