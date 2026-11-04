@@ -194,7 +194,8 @@ successful response that called no tool and stopped is the final reply
 request; a new request forgets it). After `finalGraceMs` (15 s) with no model
 request and no MCP tool call in flight, the broker aborts the native run — the
 ordinary cancel/kill path — and seals the turn **completed** with that reply,
-the proxy-metered usage, and the worker it observed in `/proc` while it was
+the proxy-metered usage (its row `complete` exactly when every forwarded
+request settled with provider usage, none estimated), and the worker it observed in `/proc` while it was
 alive (`findGrokWorkerProcess`: the identity's newest process whose parent it
 does not own — a previous turn's hung worker may still be beside it). The same completed seal covers finished work the launcher's output
 bound refused (`output_limit` publishes nothing; the frame's own worker pid is

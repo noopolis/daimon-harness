@@ -84,7 +84,18 @@ test("a worker that gave its final reply and never exits is ended by the broker 
     assert.ok(Date.now() - started < 5_000, `ended after ${Date.now() - started} ms`);
     assert.deepEqual({ ...result }, { text: "FILED-REVISION-3", workerPid: 5_151, workerUid: 2_200, workerStartTime: "777", outcome: "completed", usage: { input: 5_136, cacheRead: 256, cacheWrite: 0, output: 158, total: 5_550 }, model: "grok-4.6", requests: 2, limitReason: "none" });
     assert.equal(endedStreams(), 1, "the turn's MCP routes, tunnel included, are revoked when the broker ends it");
-    assert.deepEqual((await rows()).map((row) => [row.outcome, row.limit_reason, row.total, row.calls]), [["completed", "none", 5_550, 2]]);
+    // Mutation guard: a final-reply seal stamped incomplete left every real Grok turn's usage partial.
+    assert.deepEqual((await rows()).map((row) => [row.outcome, row.limit_reason, row.total, row.calls, row.complete]), [["completed", "none", 5_550, 2, true]]);
+  });
+});
+
+test("a final-reply seal with a request the provider gave no usage for stays incomplete", async () => {
+  const unmetered = toolCall.replace(/,"usage":\{[^}]*\{[^}]*\}\}/u, "");
+  assert.notEqual(unmetered, toolCall);
+  await withBroker([unmetered, finalReply("FILED")], async ({ turn, rows }) => {
+    const result = await turn("wake-unmetered", async (send, signal) => { await send(); await send(); return untilAborted(signal); });
+    assert.equal(result.outcome, "completed");
+    assert.deepEqual((await rows()).map((row) => [row.outcome, row.complete, row.estimated_requests]), [["completed", false, 1]]);
   });
 });
 
