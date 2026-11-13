@@ -160,6 +160,8 @@ class CliSession implements PiSessionLike {
     // Kept beside the decoded turn so a wake that never reaches its decoder
     // still owes the ledger the usage Codex already reported (`cliTurnMetering.ts`).
     const meter = createCliTurnMeter();
+    // AGY reports usage only on its terminal frame; its meter keeps the finished steps a killed turn already paid for.
+    const engineMeter = handler.createTurnMeter?.();
     // Codex's own `thread.started` frame, carried out of the stream so the
     // wake's rollout can be found by identity rather than by recency.
     let codexThreadId: string | undefined;
@@ -204,6 +206,7 @@ class CliSession implements PiSessionLike {
       const outputPromise = readChild(child, deadline === undefined ? undefined : Math.max(1, deadline - Date.now()), secretValues, {
         ...handler.childReadOptions(this.options),
         onCodexTurnCompleted: meter.observeCodexTurnCompleted,
+        ...(engineMeter === undefined ? {} : { onStdoutData: engineMeter.observe }),
         onCodexThreadStarted: (threadId) => { codexThreadId = threadId; }
       });
       void outputPromise.catch(() => undefined);
@@ -233,7 +236,7 @@ class CliSession implements PiSessionLike {
     // a turn judged unpublishable all cost money the ledger never saw.
     const failure = promptFailure ?? cleanupFailure;
     if (failure !== undefined) {
-      await publishTurnUsage(this.options.onTurnUsage, turnUsage ?? meter.reported(), failedTurnOutcome(failure));
+      await publishTurnUsage(this.options.onTurnUsage, turnUsage ?? meter.reported() ?? engineMeter?.reported(), failedTurnOutcome(failure));
       // A wake that failed still made model requests and still paid for them,
       // so its per-request shape is measured on exactly the paths its spend is.
       await instrument();

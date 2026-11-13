@@ -5,6 +5,7 @@ import { registerCliMcpServer } from "../../pi/cliMcpRegistration.js";
 import { renderAgyMcpAddArgs, renderAgyMcpRemoveArgs } from "./piMcpRegistration.js";
 import { renderAgyArgs } from "./piArgs.js";
 import { decodeAgyHeadlessTurn } from "./agyHeadlessResult.js";
+import { createAgyTurnMeter } from "./agyTurnMeter.js";
 
 export const AGY_MAX_TOOL_TURNS = 16;
 const localSecretServiceBus = (value: string | undefined): string | undefined =>
@@ -32,6 +33,7 @@ export const agyPiHooks: PiEngineHooks = {
   brokerTurn: () => undefined,
   childReadOptions: () => ({}),
   decodeOutput: decodeAgyHeadlessTurn,
+  createTurnMeter: createAgyTurnMeter,
   authenticationError: () => undefined,
   defaultRunOptions: () => ({ engine: "agy", maxToolTurns: AGY_MAX_TOOL_TURNS, timeoutMs: 180_000 }),
   taskClockGap: "no supported tool-only environment setting"
