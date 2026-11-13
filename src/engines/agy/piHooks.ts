@@ -3,7 +3,7 @@ import type { PiEngineHooks } from "../piHooks.js";
 import { cliChildEnvironment } from "../../pi/cliEnvironment.js";
 import { registerCliMcpServer } from "../../pi/cliMcpRegistration.js";
 import { renderAgyMcpAddArgs, renderAgyMcpRemoveArgs } from "./piMcpRegistration.js";
-import { renderAgyArgs } from "./piArgs.js";
+import { agyMcpSchemaDirectory, renderAgyArgs } from "./piArgs.js";
 import { decodeAgyHeadlessTurn } from "./agyHeadlessResult.js";
 import { createAgyTurnMeter } from "./agyTurnMeter.js";
 import { createAgyOutputRetention } from "./agyOutputRetention.js";
@@ -18,7 +18,9 @@ export const agyPiHooks: PiEngineHooks = {
     const bus = localSecretServiceBus(dbusSessionBusAddress);
     return { ...(engineHomePath === undefined ? {} : { [ENGINE_DESCRIPTORS.agy.homeEnvironment]: engineHomePath }), ...(bus === undefined ? {} : { [ENGINE_DESCRIPTORS.agy.auth.busEnvironment]: bus }) };
   },
-  spawnPlan: (options, prompt) => ({ args: renderAgyArgs(options, prompt) }),
+  spawnPlan: (options, prompt, input, endpoint) => ({
+    args: renderAgyArgs(options, prompt, undefined, endpoint === undefined || input.runtimeHomePath === undefined ? [] : [agyMcpSchemaDirectory(input.runtimeHomePath)])
+  }),
   registerMcp: async ({ options, input, endpoint, onChild, onChildSettled, secretValues }) => {
     await options.verifyExecutable?.();
     return registerCliMcpServer({
