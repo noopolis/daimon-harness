@@ -3,7 +3,8 @@ import { tagCliChildFailure } from "../../pi/cliChildOutput.js";
 import type { EngineOutputRetention } from "../piHooks.js";
 
 export type CodexChildOutputOptions = Readonly<{
-    retainNdjson?: "codex";
+    /** The engine whose output retention keeps only its metered protocol. */
+    retainNdjson?: "codex" | "agy";
     /**
      * Per-wake token ceiling for a Codex turn (`retainNdjson: "codex"` only).
      * Codex's `--json` stream reports usage exactly once, on `turn.completed`

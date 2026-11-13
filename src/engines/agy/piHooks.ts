@@ -6,6 +6,7 @@ import { renderAgyMcpAddArgs, renderAgyMcpRemoveArgs } from "./piMcpRegistration
 import { renderAgyArgs } from "./piArgs.js";
 import { decodeAgyHeadlessTurn } from "./agyHeadlessResult.js";
 import { createAgyTurnMeter } from "./agyTurnMeter.js";
+import { createAgyOutputRetention } from "./agyOutputRetention.js";
 
 export const AGY_MAX_TOOL_TURNS = 16;
 const localSecretServiceBus = (value: string | undefined): string | undefined =>
@@ -31,7 +32,8 @@ export const agyPiHooks: PiEngineHooks = {
     });
   },
   brokerTurn: () => undefined,
-  childReadOptions: () => ({}),
+  childReadOptions: () => ({ retainNdjson: "agy" }),
+  createOutputRetention: createAgyOutputRetention,
   decodeOutput: decodeAgyHeadlessTurn,
   createTurnMeter: createAgyTurnMeter,
   authenticationError: () => undefined,
