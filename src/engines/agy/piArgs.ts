@@ -29,15 +29,28 @@ import type { CliEngineOptions } from "../../pi/cliSession.js";
 export const renderAgyArgs = (
   options: Pick<CliEngineOptions, "commandArgs" | "timeoutMs">,
   prompt: string,
-  sandbox: boolean = process.env.DAIMON_AGY_SANDBOX === "1"
+  sandbox: boolean = process.env.DAIMON_AGY_SANDBOX === "1",
+  readableDirectories: readonly string[] = []
 ): string[] => [
   ...assertSafeAgyCommandArgs(options.commandArgs),
   "--print", prompt,
   "--output-format", "stream-json",
   "--dangerously-skip-permissions",
   ...(sandbox ? ["--sandbox"] : []),
-  ...(options.timeoutMs === undefined ? [] : ["--print-timeout", `${options.timeoutMs}ms`])
+  ...(options.timeoutMs === undefined ? [] : ["--print-timeout", `${options.timeoutMs}ms`]),
+  ...readableDirectories.flatMap((directory) => ["--add-dir", directory])
 ];
+
+/**
+ * Where AGY materializes each registered MCP server's tool schemas, under its
+ * own `HOME`. AGY reads a schema with `view_file` before every `call_mcp_tool`,
+ * and its permission check refuses any read outside the workspace, so with the
+ * runtime home outside the workspace (as in every Daimon organization) an AGY
+ * agent could see its Daimon tools listed but never call one: a Tinkerton trial
+ * spent 75 steps searching the filesystem and filed nothing. Only this
+ * directory is added, never the whole home, which holds AGY's conversations.
+ */
+export const agyMcpSchemaDirectory = (homePath: string): string => `${homePath}/.gemini/antigravity-cli/mcp`;
 
 /**
  * AGY's output format, permission mode, sandbox, and session continuity are

@@ -46,3 +46,11 @@ test("AGY's permission, output-format and continuity flags are Daimon-owned", ()
   }
   assert.deepEqual(renderAgyArgs({ commandArgs: ["--effort", "high"] }, "P", false).slice(0, 2), ["--effort", "high"]);
 });
+
+test("an AGY turn with Daimon tools may read its own MCP tool schemas, and nothing else of its home", async () => {
+  const { agyPiHooks } = await import("../engines/agy/piHooks.js");
+  const plan = (endpoint: string | undefined) => agyPiHooks.spawnPlan({ engine: "agy" }, "PROMPT", { cwd: "/workspace", runtimeHomePath: "/homes/agent" }, endpoint).args;
+  const withTools = plan("http://127.0.0.1:4321/mcp");
+  assert.deepEqual(withTools.slice(withTools.indexOf("--add-dir")), ["--add-dir", "/homes/agent/.gemini/antigravity-cli/mcp"]);
+  assert.equal(plan(undefined).includes("--add-dir"), false);
+});
