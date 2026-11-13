@@ -717,7 +717,11 @@ routed through it, so Codex gets its own bounds instead —
 `DEFAULT_CODEX_WAKE_TOKEN_CEILING`, both in `../pi/engineWakeLimits.ts`, overridable
 via the engine-neutral `DAIMON_ENGINE_WAKE_TIMEOUT_MS`/`DAIMON_ENGINE_WAKE_TOKEN_CEILING`
 (the `DAIMON_CODEX_*` names are aliases; conflicting values are refused), which
-the dispatcher also passes to the Grok broker as lowering limits. The token
+the dispatcher also passes to the Grok broker as lowering limits. A Codex or
+AGY agent may declare `engine.turnTimeoutMs` (1 s to 1 h) in the organization
+config; it wins over the environment and the engine default (Codex 240 s, AGY
+180 s, passed to AGY as `--print-timeout`). Grok refuses it: its broker
+registration's `turn_limits` bound its turns. The token
 ceiling can only be checked when Codex reports it: its `--json` stream carries
 usage exactly once, on the turn's own `turn.completed`, so crossing it kills
 the child immediately and fails the wake instead of letting an over-budget

@@ -261,7 +261,7 @@ test("rejects an unrecognized codex reasoningEffort value", () => {
 
 test("the engine JSON Schema and the parser agree on model/reasoningEffort", () => {
   const engineSchema = ORGANIZATION_RUNTIME_CONFIG_SCHEMA.properties.agents.items.properties.engine;
-  assert.deepEqual(Object.keys(engineSchema.properties).sort(), ["codexSandbox", "kind", "model", "reasoningEffort"]);
+  assert.deepEqual(Object.keys(engineSchema.properties).sort(), ["codexSandbox", "kind", "model", "reasoningEffort", "turnTimeoutMs"]);
   assert.deepEqual(engineSchema.required, ["kind"]);
   assert.deepEqual(engineSchema.properties.reasoningEffort.enum, ORGANIZATION_RUNTIME_CODEX_REASONING_EFFORTS);
   for (const value of ORGANIZATION_RUNTIME_CODEX_REASONING_EFFORTS) {
