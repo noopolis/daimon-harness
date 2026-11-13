@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/noopolis/spawnfile",
-  "commit": "d16465c22e3603f8ce09b000dc14715e403862b9",
+  "commit": "35d17e65df73d7e5ce0e8335c3b88c6db5dcacde",
   "files": {
     "src/runtime/daimon/contractManifest.ts": {
       "sha256": "d2063065095c6d4cd6709f1234837ba13db3aeac1f2330b0189617107c92487e",
