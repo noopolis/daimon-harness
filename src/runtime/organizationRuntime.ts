@@ -48,7 +48,7 @@ export type OrganizationRuntimeEngineKind = EngineKind;
  * satisfies the invariant; callers that need it narrow on the engine kind.
  */
 export type OrganizationRuntimeCodexSandboxPolicy = Readonly<{ mode: "workspace-write"; networkAccess: false; webSearch: "disabled" }>;
-export type OrganizationRuntimeEngineIntent = Readonly<{ kind: OrganizationRuntimeEngineKind; model?: string; reasoningEffort?: string; codexSandbox?: OrganizationRuntimeCodexSandboxPolicy }>;
+export type OrganizationRuntimeEngineIntent = Readonly<{ kind: OrganizationRuntimeEngineKind; model?: string; reasoningEffort?: string; codexSandbox?: OrganizationRuntimeCodexSandboxPolicy; /** Codex and AGY only: wall-clock bound on one turn. */ turnTimeoutMs?: number }>;
 export type OrganizationRuntimeMcpServer = Readonly<{ name: string; transport: "stdio" | "sse" | "streamable_http"; command?: string; args: readonly string[]; env: Readonly<Record<string, string>>; authSecretEnv?: string; url?: string; tools: readonly string[] }>;
 export type OrganizationRuntimeMoltnet = Readonly<{ cliPath: string; configPath: string; networks: readonly Readonly<{ id: string; rooms: readonly string[]; dms: boolean }>[] }>;
 export type OrganizationRuntimeMemory = Readonly<{ runtimeHomePath: string; source?: string; tokenBudget?: number }>;

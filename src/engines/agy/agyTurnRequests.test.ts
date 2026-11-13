@@ -66,7 +66,7 @@ test("an AGY turn's usage sink appends its step rows beside the usage ledger", a
   process.env.DAIMON_TURN_USAGE_LEDGER_PATH = path.join(directory, "usage.jsonl");
   process.env.DAIMON_TURN_REQUESTS_LEDGER_PATH = path.join(directory, "requests.jsonl");
   try {
-    const options = agyRuntimeHooks.runtimeSessionOptions({ agent: { id: "judge" }, wakeEnvironmentContext: { current: "judge-1" } } as never) as { onTurnUsage: (usage: unknown, outcome: unknown) => Promise<void> };
+    const options = agyRuntimeHooks.runtimeSessionOptions({ agent: { id: "judge", engine: { kind: "agy" } }, wakeEnvironmentContext: { current: "judge-1" } } as never) as { onTurnUsage: (usage: unknown, outcome: unknown) => Promise<void> };
     await options.onTurnUsage(decodeAgyHeadlessTurn(fixture("agy-stream-json-tool-result.jsonl")).usage, { status: "completed" });
     const rows = (await readFile(path.join(directory, "requests.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { wake: string; tool_calls: string[] });
     assert.deepEqual(rows.map((row) => [row.wake, row.tool_calls]), [["judge-1", ["view_file"]], ["judge-1", ["call_mcp_tool"]], ["judge-1", []]]);
