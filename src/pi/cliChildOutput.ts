@@ -83,6 +83,8 @@ export const readChild = (
     retainStdoutTail?: boolean;
     /** Overrides the generic wall-clock-timeout message so the caller can name which bound was hit. */
     timeoutErrorMessage?: string;
+    /** Every stdout chunk as it arrives, before retention; for an engine meter that must outlive a killed child. */
+    onStdoutData?: (chunk: Buffer) => void;
   }> & CodexChildOutputOptions = {}
 ): Promise<string> => new Promise((resolve, reject) => {
   trackCliChild(child);
@@ -138,6 +140,7 @@ export const readChild = (
   const retainStdout = (chunk: Buffer): void => {
     const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     classifyFailure(value);
+    try { options.onStdoutData?.(value); } catch { /* advisory metering never fails the turn */ }
     if (outputRetention !== undefined) { outputRetention.retain(value); return; }
     if (options.retainStdoutTail === true) {
       let remainder = value;

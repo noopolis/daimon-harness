@@ -25,6 +25,18 @@ test("a declared engine turn timeout bounds Codex and AGY turns; absent keeps ea
   assert.equal(sessionTimeout(codexRuntimeHooks, { kind: "codex", turnTimeoutMs: 1_800_000 }), 1_800_000);
 });
 
+test("AGY honors the engine-neutral DAIMON_ENGINE_WAKE_TIMEOUT_MS below a declared field, like Codex", () => {
+  const previous = process.env.DAIMON_ENGINE_WAKE_TIMEOUT_MS;
+  process.env.DAIMON_ENGINE_WAKE_TIMEOUT_MS = "600000";
+  try {
+    assert.equal(sessionTimeout(agyRuntimeHooks, { kind: "agy" }), 600_000);
+    assert.equal(sessionTimeout(agyRuntimeHooks, { kind: "agy", turnTimeoutMs: 2_700_000 }), 2_700_000);
+    assert.equal(sessionTimeout(codexRuntimeHooks, { kind: "codex" }), 600_000);
+  } finally {
+    if (previous === undefined) delete process.env.DAIMON_ENGINE_WAKE_TIMEOUT_MS; else process.env.DAIMON_ENGINE_WAKE_TIMEOUT_MS = previous;
+  }
+});
+
 test("the engine turn timeout is bounded, CLI-engine only and published in the contract", () => {
   for (const value of [999, 3_600_001, 1.5, "1800000"]) {
     assert.throws(() => config({ kind: "agy", turnTimeoutMs: value }), /turnTimeoutMs must be an integer from 1000 to 3600000/u);

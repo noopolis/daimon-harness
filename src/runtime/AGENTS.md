@@ -720,7 +720,10 @@ via the engine-neutral `DAIMON_ENGINE_WAKE_TIMEOUT_MS`/`DAIMON_ENGINE_WAKE_TOKEN
 the dispatcher also passes to the Grok broker as lowering limits. A Codex or
 AGY agent may declare `engine.turnTimeoutMs` (1 s to 1 h) in the organization
 config; it wins over the environment and the engine default (Codex 240 s, AGY
-180 s, passed to AGY as `--print-timeout`). Grok refuses it: its broker
+180 s, passed to AGY as `--print-timeout`). AGY reads `DAIMON_ENGINE_WAKE_TIMEOUT_MS` too. AGY
+reports usage only on its terminal frame, so `agyTurnMeter.ts` sums the finished
+`agent_response` steps as they stream; a turn killed by its clock still writes a
+failed usage row (`complete: false`) and its `requests.jsonl` step rows. Grok refuses it: its broker
 registration's `turn_limits` bound its turns. The token
 ceiling can only be checked when Codex reports it: its `--json` stream carries
 usage exactly once, on the turn's own `turn.completed`, so crossing it kills

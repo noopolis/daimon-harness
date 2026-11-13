@@ -31,6 +31,8 @@ export interface PiEngineHooks {
   readonly brokerTurn: (options: CliEngineOptions) => CliEngineOptions["grokBrokerTurn"];
   readonly childReadOptions: (options: CliEngineOptions) => EngineChildReadOptions;
   readonly decodeOutput: (output: string) => { text: string; usage?: AgyTurnUsage | CodexTurnUsage };
+  /** Per-turn usage measured from stdout as it streams, for a turn killed before its decoder ran. */
+  readonly createTurnMeter?: () => { observe: (chunk: Buffer) => void; reported: () => AgyTurnUsage | CodexTurnUsage | undefined };
   readonly authenticationError: (failure: unknown, cleanupFailure?: Error) => Error | undefined;
   readonly defaultRunOptions: () => CliEngineOptions;
   readonly taskClockGap?: string;

@@ -1,10 +1,13 @@
 import { runAgySubscriptionBootstrap } from "./agySubscriptionBootstrap.js";
-import { AGY_MAX_TOOL_TURNS } from "../../pi/cliSession.js";
+import { AGY_MAX_TOOL_TURNS, resolveEngineWakeLimitOverrides } from "../../pi/cliSession.js";
 import { prepareEngineExecutable, prepareEngineReadiness, verifyAgySubscriptionEnrollment } from "../../runtime/engineReadiness.js";
 import { recordTurnUsage, resolveTurnUsageLedgerPath } from "../../runtime/turnUsageLedger.js";
 import { bareMountedToolNamingRule, type RuntimeEngineHooks } from "../runtimeHooks.js";
 import { startAgySubscriptionRealm } from "./agySubscriptionRealm.js";
 import { recordAgyTurnRequests } from "./agyTurnRequests.js";
+
+/** AGY turn wall clock when neither the agent nor `DAIMON_ENGINE_WAKE_TIMEOUT_MS` declares one. */
+export const AGY_DEFAULT_TURN_TIMEOUT_MS = 180_000;
 
 export const agyRuntimeHooks: RuntimeEngineHooks = {
   cliCommandKind: "agy-login",
@@ -45,7 +48,7 @@ export const agyRuntimeHooks: RuntimeEngineHooks = {
   runtimeSessionOptions({ agent, agyBusAddress, wakeEnvironmentContext }) {
     return {
       maxToolTurns: AGY_MAX_TOOL_TURNS,
-      timeoutMs: agent.engine.turnTimeoutMs ?? 180_000,
+      timeoutMs: agent.engine.turnTimeoutMs ?? resolveEngineWakeLimitOverrides()?.timeoutMs ?? AGY_DEFAULT_TURN_TIMEOUT_MS,
       dbusSessionBusAddress: agyBusAddress,
       onTurnUsage: async (usage, outcome) => {
         const wake = wakeEnvironmentContext.current ?? "wake";
