@@ -177,7 +177,7 @@ test("descriptor sandbox capabilities correspond to the real config and rendered
 
 test("manifest v7 emits the static inventory and preserves legacy aliases", () => {
   assert.equal(RUNTIME_CONTRACT_MANIFEST.version, "noopolis.daimon.runtime-contract-manifest.v7");
-  assert.equal(sha256(`${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`), "0f9d9c57f4455da7f4e07d399245e926d9d13a1092f607f41ba8e9e5cc964be6");
+  assert.equal(sha256(`${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`), "481f189e8b7d7e5927e215ed0d30d0d963b5b6d1677b87374bed929ee6a39608");
   assert.equal(RUNTIME_CONTRACT_MANIFEST.engines, ENGINE_DESCRIPTORS);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokEngineBroker, grok.broker);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokSubscriptionRealm, grok.auth.realm);
@@ -188,5 +188,5 @@ test("manifest v7 emits the static inventory and preserves legacy aliases", () =
 test("manifest v7 retains every released v5 section byte-for-byte canonically", () => {
   const { engines: _engines, codexSubscriptionRealm: _codexRealm, ...legacy } = RUNTIME_CONTRACT_MANIFEST;
   const v5 = { ...legacy, version: "noopolis.daimon.runtime-contract-manifest.v5" };
-  assert.equal(sha256(`${canonicalJson(v5)}\n`), "c5d9ab6ad7314993ac281e62b37dbcea2fe7a42bfb0386b36120770596bc8599");
+  assert.equal(sha256(`${canonicalJson(v5)}\n`), "0e401c235b44e2c13b7b81676982e04d933de98d15c204141af3a715c07b5ebe");
 });

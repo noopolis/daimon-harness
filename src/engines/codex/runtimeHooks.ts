@@ -44,7 +44,7 @@ export const codexRuntimeHooks: RuntimeEngineHooks = {
     return {
       onTurnUsage: (usage, outcome) => recordTurnUsage(resolveTurnUsageLedgerPath(), { agent: agent.id, wake: wakeEnvironmentContext.current ?? "wake", engine: "codex", usage, outcome }),
       onCodexTurnRequests: (threadId) => recordCodexTurnRequests({ agent: agent.id, wake: wakeEnvironmentContext.current ?? "wake", codexHome: engineHomePath, threadId }).then(() => undefined),
-      timeoutMs: resolveCodexWakeTimeoutMs(),
+      timeoutMs: agent.engine.turnTimeoutMs ?? resolveCodexWakeTimeoutMs(),
       codexTokenCeiling: resolveCodexWakeTokenCeiling(),
       ...(agent.engine.model === undefined ? {} : { model: agent.engine.model }),
       ...(agent.engine.reasoningEffort === undefined ? {} : { reasoningEffort: agent.engine.reasoningEffort }),

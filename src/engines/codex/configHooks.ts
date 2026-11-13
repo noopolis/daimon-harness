@@ -1,16 +1,17 @@
 import { ORGANIZATION_RUNTIME_CODEX_REASONING_EFFORTS, ORGANIZATION_RUNTIME_CODEX_WORKSPACE_NO_NETWORK_POLICY } from "./configSchema.js";
 import type { OrganizationRuntimeEngineIntent } from "../../runtime/organizationRuntime.js";
-import type { ConfigEngineHooks, EngineConfigParsers } from "../configHooks.js";
+import { parseTurnTimeoutMs, type ConfigEngineHooks, type EngineConfigParsers } from "../configHooks.js";
 
 export const codexConfigHooks: ConfigEngineHooks = {
   parseConfig(input, label, parsers) {
-    const allowed = ["kind", "model", "reasoningEffort", "codexSandbox"];
+    const allowed = ["kind", "model", "reasoningEffort", "codexSandbox", "turnTimeoutMs"];
     if (Object.keys(input).some((key) => !allowed.includes(key))) throw new TypeError(`${label} must contain exactly ${allowed.join(", ")}`);
     return {
       kind: "codex",
       ...(input.model === undefined ? {} : { model: parsers.nonEmpty(input.model, `${label}.model`) }),
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: reasoningEffort(input.reasoningEffort, `${label}.reasoningEffort`, parsers) }),
-      ...(input.codexSandbox === undefined ? {} : { codexSandbox: codexSandbox(input.codexSandbox, `${label}.codexSandbox`, parsers) })
+      ...(input.codexSandbox === undefined ? {} : { codexSandbox: codexSandbox(input.codexSandbox, `${label}.codexSandbox`, parsers) }),
+      ...(input.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: parseTurnTimeoutMs(input.turnTimeoutMs, `${label}.turnTimeoutMs`) })
     };
   }
 };

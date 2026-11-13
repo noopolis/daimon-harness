@@ -20,6 +20,13 @@ export const ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES = 16_384;
  * organization whose wakes carry whole documents (a training judge) declares more.
  */
 export const ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES_CEILING = 262_144;
+/**
+ * Bounds on an agent's optional `engine.turnTimeoutMs`: the wall clock one Codex
+ * or AGY turn may run before Daimon kills it. Absent keeps the engine default
+ * (Codex 240 s, AGY 180 s); Grok bounds its turns through its broker registration.
+ */
+export const ORGANIZATION_RUNTIME_MIN_TURN_TIMEOUT_MS = 1_000;
+export const ORGANIZATION_RUNTIME_MAX_TURN_TIMEOUT_MS = 3_600_000;
 export const ORGANIZATION_RUNTIME_MAX_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 /**
  * Upper bound on `schedule.jitter_seconds`. Jitter exists to blur a wake's
@@ -74,6 +81,7 @@ export const ORGANIZATION_RUNTIME_CONFIG_SCHEMA = {
           kind: { enum: ENGINE_IDS },
           model: { type: "string", minLength: 1, maxLength: ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS, pattern: "\\S" },
           reasoningEffort: { enum: ORGANIZATION_RUNTIME_CODEX_REASONING_EFFORTS },
+          turnTimeoutMs: { type: "integer", minimum: ORGANIZATION_RUNTIME_MIN_TURN_TIMEOUT_MS, maximum: ORGANIZATION_RUNTIME_MAX_TURN_TIMEOUT_MS },
           codexSandbox: { type: "object", additionalProperties: false, required: ["mode", "networkAccess", "webSearch"], properties: {
             mode: { const: "workspace-write" }, networkAccess: { const: false }, webSearch: { const: "disabled" }
           } }

@@ -45,7 +45,7 @@ export const agyRuntimeHooks: RuntimeEngineHooks = {
   runtimeSessionOptions({ agent, agyBusAddress, wakeEnvironmentContext }) {
     return {
       maxToolTurns: AGY_MAX_TOOL_TURNS,
-      timeoutMs: 180_000,
+      timeoutMs: agent.engine.turnTimeoutMs ?? 180_000,
       dbusSessionBusAddress: agyBusAddress,
       onTurnUsage: async (usage, outcome) => {
         const wake = wakeEnvironmentContext.current ?? "wake";

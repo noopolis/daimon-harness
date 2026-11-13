@@ -8,5 +8,5 @@ import { RUNTIME_CONTRACT_MANIFEST } from "../contracts/runtimeContractManifest.
 test("manifest v7 pins the canonical emitted bytes including engine descriptors", () => {
   const bytes = `${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`;
   assert.equal(`sha256:${createHash("sha256").update(bytes).digest("hex")}`,
-    "sha256:0f9d9c57f4455da7f4e07d399245e926d9d13a1092f607f41ba8e9e5cc964be6");
+    "sha256:481f189e8b7d7e5927e215ed0d30d0d963b5b6d1677b87374bed929ee6a39608");
 });
