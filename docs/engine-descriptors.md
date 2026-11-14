@@ -27,7 +27,9 @@ Keep the descriptor-source commit pinned independently of deployed images.
   that keeps a run's evidence after its container is gone. A listed path may be
   absent on a given run. It never lists a credential, a login file or a
   directory holding one: AGY keeps its login beside its records, so its entries
-  are named one by one and never its whole CLI home. A consumer still owns
+  are named one by one and never its whole CLI home. Codex and AGY also list
+  `.local/state/daimon-engine-output`, where Daimon keeps each wake's whole
+  engine stdout. A consumer still owns
   collection, bounds and scrubbing.
 - `modelSelection` describes organization-runtime declarations. Codex accepts
   any nonblank model string and a closed effort vocabulary. Null defaults mean

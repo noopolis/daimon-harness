@@ -177,7 +177,7 @@ test("descriptor sandbox capabilities correspond to the real config and rendered
 
 test("manifest v7 emits the static inventory and preserves legacy aliases", () => {
   assert.equal(RUNTIME_CONTRACT_MANIFEST.version, "noopolis.daimon.runtime-contract-manifest.v7");
-  assert.equal(sha256(`${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`), "e6eedf2e83af312b33328ab3e768e888e132f53f6db3c1c6ce3768adff439da9");
+  assert.equal(sha256(`${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`), "534ed1b375f7cc97056c16cea61cd89659b5d6286370f10c81871f8a1c1916bd");
   assert.equal(RUNTIME_CONTRACT_MANIFEST.engines, ENGINE_DESCRIPTORS);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokEngineBroker, grok.broker);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokSubscriptionRealm, grok.auth.realm);

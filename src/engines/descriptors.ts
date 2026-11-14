@@ -1,5 +1,5 @@
 /** Static engine inventory. This module must never import executable handlers. */
-import { CODEX_HOME_DIRECTORY, GROK_HOME_DIRECTORY, PORTABLE_AUTH_FILE_NAME, CODEX_SUBSCRIPTION_INTENT, CODEX_CREDENTIAL_MATERIAL, CODEX_SUBSCRIPTION_REALM, AGY_SUBSCRIPTION_REALM, GROK_ENGINE_BROKER, GROK_SUBSCRIPTION_REALM } from "./descriptorContracts.js";
+import { CODEX_HOME_DIRECTORY, ENGINE_OUTPUT_RECORD_DIRECTORY, GROK_HOME_DIRECTORY, PORTABLE_AUTH_FILE_NAME, CODEX_SUBSCRIPTION_INTENT, CODEX_CREDENTIAL_MATERIAL, CODEX_SUBSCRIPTION_REALM, AGY_SUBSCRIPTION_REALM, GROK_ENGINE_BROKER, GROK_SUBSCRIPTION_REALM } from "./descriptorContracts.js";
 
 /**
  * `diagnostics.paths`: the engine's own records of its turns (transcripts, CLI logs), relative to the agent
@@ -27,7 +27,7 @@ export const ENGINE_DESCRIPTORS = {
     training: { subject: { supported: true, isolation: "native-sandbox" }, inferenceGrants: null },
     broker: null,
     requiredBinaries: ["codex"], homeDirectory: CODEX_HOME_DIRECTORY, homeEnvironment: "CODEX_HOME",
-    diagnostics: { paths: [`${CODEX_HOME_DIRECTORY}/sessions`, `${CODEX_HOME_DIRECTORY}/log`] },
+    diagnostics: { paths: [`${CODEX_HOME_DIRECTORY}/sessions`, `${CODEX_HOME_DIRECTORY}/log`, ENGINE_OUTPUT_RECORD_DIRECTORY] },
     capabilities: { portableCredential: true, nativeSandbox: true, broker: false, secretService: false }
   },
   grok: {
@@ -66,7 +66,7 @@ export const ENGINE_DESCRIPTORS = {
     broker: null,
     requiredBinaries: ["agy", "dbus-daemon", "gnome-keyring-daemon"], homeDirectory: "", homeEnvironment: "ANTIGRAVITY_CLI_HOME",
     // AGY keeps its login beside these (its OAuth token, installation id and `cache/`); none of them is listed.
-    diagnostics: { paths: [".gemini/antigravity-cli/log", ".gemini/antigravity-cli/cli.log", ".gemini/antigravity-cli/brain", ".gemini/antigravity-cli/conversations", ".gemini/antigravity-cli/crashes"] },
+    diagnostics: { paths: [".gemini/antigravity-cli/log", ".gemini/antigravity-cli/cli.log", ".gemini/antigravity-cli/brain", ".gemini/antigravity-cli/conversations", ".gemini/antigravity-cli/crashes", ENGINE_OUTPUT_RECORD_DIRECTORY] },
     capabilities: { portableCredential: false, nativeSandbox: false, broker: false, secretService: true }
   }
 } as const;

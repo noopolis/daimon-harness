@@ -9,6 +9,7 @@ import { redactCredentialError, redactCredentialText } from "../core/credentialR
 import type { TurnUsageOutcome } from "../runtime/turnUsageLedger.js";
 import { readChild } from "./cliChildOutput.js";
 import { createCliStderrLog } from "./cliStderrLog.js";
+import { openEngineOutputRecord, type EngineOutputRecord } from "./cliStdoutRecord.js";
 import { spawnEngine } from "./cliEngineSpawn.js";
 import type { CliMcpRegistration } from "./cliMcpRegistration.js";
 import { type AgyTurnUsage } from "../engines/agy/agyHeadlessResult.js";
@@ -173,6 +174,7 @@ class CliSession implements PiSessionLike {
       await publishTurnRequests(this.options.onCodexTurnRequests, codexThreadId);
     };
     let child: ChildProcess | undefined;
+    let stdoutRecord: EngineOutputRecord | undefined;
     let output: string | undefined;
     let cleanupFailure: unknown;
     let promptFailure: unknown;
@@ -205,12 +207,15 @@ class CliSession implements PiSessionLike {
       // Attach terminal listeners synchronously. A fast local sentinel may
       // exit before an asynchronous post-spawn authority recheck completes.
       // The engine's whole stderr goes to the runtime's own log; a failure's error carries only an excerpt.
+      // The engine's whole stdout stays in its runtime home; what the decoder retains is bounded and reshaped.
+      stdoutRecord = await openEngineOutputRecord(this.input.runtimeHomePath, this.options.engine, this.wakeId, secretValues);
+      const record = stdoutRecord;
       const stderrLog = createCliStderrLog(`engine=${this.options.engine} wake=${this.wakeId ?? "none"}`, secretValues);
       const outputPromise = readChild(child, deadline === undefined ? undefined : Math.max(1, deadline - Date.now()), secretValues, {
         ...handler.childReadOptions(this.options),
         onStderrData: stderrLog.observe,
         onCodexTurnCompleted: meter.observeCodexTurnCompleted,
-        ...(engineMeter === undefined ? {} : { onStdoutData: engineMeter.observe }),
+        onStdoutData: (chunk) => { record.observe(chunk); engineMeter?.observe(chunk); },
         onCodexThreadStarted: (threadId) => { codexThreadId = threadId; }
       });
       void outputPromise.then(stderrLog.finish, stderrLog.finish);
@@ -225,6 +230,7 @@ class CliSession implements PiSessionLike {
       promptFailure = error;
     } finally {
       cleanupFailure = await captureCleanup(cleanupFailure, async () => { if (child !== undefined) await terminateChild(child); });
+      await stdoutRecord?.finish();
       if (this.activeChild === child) this.activeChild = undefined;
       let registrationClosed = registration === undefined;
       cleanupFailure = await captureCleanup(cleanupFailure, async () => { await registration?.close(); registrationClosed = true; });
