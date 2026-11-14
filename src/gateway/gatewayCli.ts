@@ -48,7 +48,7 @@ export async function runGatewayCli(arguments_: readonly string[]): Promise<Runn
       const realm = await startGrokSubscriptionRealm(realmPaths(config.grok));
       realms.push(realm);
       await sweepGrokRefreshScratch(config.grok.scratchPath);
-      const refresh = createGrokRefresh({ command: config.grok.command ?? GROK_ENGINE_BROKER.grokExecutablePath, ...(config.grok.scratchPath === undefined ? {} : { scratchRoot: config.grok.scratchPath }) });
+      const refresh = createGrokRefresh({ seedExpiredOnce: forceRefreshOnce, command: config.grok.command ?? GROK_ENGINE_BROKER.grokExecutablePath, ...(config.grok.scratchPath === undefined ? {} : { scratchRoot: config.grok.scratchPath }) });
       const owner = await createGrokRealmOwner({ authority: realm.authority, forceRefreshOnce, refresh });
       owners.push(owner);
       grok = { owner, ...upstream(config.grok) };
