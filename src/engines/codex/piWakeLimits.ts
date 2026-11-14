@@ -21,6 +21,24 @@
  */
 export const DEFAULT_CODEX_WAKE_TIMEOUT_MS = 240_000;
 export const DEFAULT_CODEX_WAKE_TOKEN_CEILING = 300_000;
+/**
+ * The weight a cached prompt read carries against the token ceiling.
+ *
+ * The ceiling bounds spend, and a cached read is billed at a tenth of a fresh
+ * input token (OpenAI's published cached-input rate for the GPT-5 family).
+ * Codex reports one cumulative usage per turn, so a tool-using turn counts its
+ * whole conversation again on every model request, about 90% of it from cache.
+ * Counted in full, the ceiling was a context-size limit: eight training turns in
+ * a row (410k to 1.03M reported, 46k to 76k of it fresh) filed their work and
+ * were then failed at the 300k default. Fresh input and output still count in
+ * full, as in the Grok broker's meter; the usage ledger keeps raw counts.
+ */
+export const CODEX_CACHED_INPUT_TOKEN_WEIGHT = 0.1;
+/** What a turn's reported usage costs against the per-wake token ceiling. */
+export const codexCeilingTokens = (usage: Readonly<{ total: number; cacheRead: number }>): number => {
+  const cached = Math.min(usage.cacheRead, usage.total);
+  return usage.total - cached + Math.ceil(cached * CODEX_CACHED_INPUT_TOKEN_WEIGHT);
+};
 export const DAIMON_ENGINE_WAKE_TIMEOUT_MS_ENV = "DAIMON_ENGINE_WAKE_TIMEOUT_MS";
 export const DAIMON_ENGINE_WAKE_TOKEN_CEILING_ENV = "DAIMON_ENGINE_WAKE_TOKEN_CEILING";
 export const DAIMON_CODEX_WAKE_TIMEOUT_MS_ENV = "DAIMON_CODEX_WAKE_TIMEOUT_MS";

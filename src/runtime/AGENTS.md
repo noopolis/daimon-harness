@@ -728,7 +728,11 @@ every tool output, so `agyOutputRetention.ts` keeps only reduced step frames
 (up to 1 MiB) and the terminal `result` frame (under the 64 KiB reply cap);
 without it a working AGY turn hit the output cap within minutes. Grok refuses it: its broker
 registration's `turn_limits` bound its turns. The token
-ceiling can only be checked when Codex reports it: its `--json` stream carries
+ceiling counts cached prompt reads at a tenth (`CODEX_CACHED_INPUT_TOKEN_WEIGHT`,
+`codexCeilingTokens`; fresh input and output in full, the ledger keeps raw counts):
+Codex reports one cumulative usage per turn, about 90% of it cached re-reads, and
+counted in full a turn that had filed its work was failed at the 300k default. It
+can only be checked when Codex reports it: its `--json` stream carries
 usage exactly once, on the turn's own `turn.completed`, so crossing it kills
 the child immediately and fails the wake instead of letting an over-budget
 turn resolve as a normal success; the wall-clock bound is what actually
