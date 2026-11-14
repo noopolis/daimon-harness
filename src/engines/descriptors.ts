@@ -1,6 +1,11 @@
 /** Static engine inventory. This module must never import executable handlers. */
 import { CODEX_HOME_DIRECTORY, GROK_HOME_DIRECTORY, PORTABLE_AUTH_FILE_NAME, CODEX_SUBSCRIPTION_INTENT, CODEX_CREDENTIAL_MATERIAL, CODEX_SUBSCRIPTION_REALM, AGY_SUBSCRIPTION_REALM, GROK_ENGINE_BROKER, GROK_SUBSCRIPTION_REALM } from "./descriptorContracts.js";
 
+/**
+ * `diagnostics.paths`: the engine's own records of its turns (transcripts, CLI logs), relative to the agent
+ * runtime home, for a consumer that keeps a run's evidence after its container is gone. A path may be absent
+ * on a given run. Never a credential, login file or login directory: `descriptors.test.ts` holds that line.
+ */
 export const ENGINE_DESCRIPTORS = {
   codex: {
     id: "codex", piAuthMethod: CODEX_SUBSCRIPTION_INTENT.method, piProvider: CODEX_SUBSCRIPTION_INTENT.piProvider, piSourceProvider: CODEX_SUBSCRIPTION_INTENT.provider, authKinds: ["subscription"],
@@ -22,6 +27,7 @@ export const ENGINE_DESCRIPTORS = {
     training: { subject: { supported: true, isolation: "native-sandbox" }, inferenceGrants: null },
     broker: null,
     requiredBinaries: ["codex"], homeDirectory: CODEX_HOME_DIRECTORY, homeEnvironment: "CODEX_HOME",
+    diagnostics: { paths: [`${CODEX_HOME_DIRECTORY}/sessions`, `${CODEX_HOME_DIRECTORY}/log`] },
     capabilities: { portableCredential: true, nativeSandbox: true, broker: false, secretService: false }
   },
   grok: {
@@ -47,6 +53,7 @@ export const ENGINE_DESCRIPTORS = {
     // Complete versioned broker contract, including pins, provisioning and turn limits.
     broker: GROK_ENGINE_BROKER,
     requiredBinaries: ["grok", "daimon-engine-broker"], homeDirectory: GROK_HOME_DIRECTORY, homeEnvironment: "GROK_HOME",
+    diagnostics: { paths: [`${GROK_HOME_DIRECTORY}/sessions`, `${GROK_HOME_DIRECTORY}/logs`] },
     capabilities: { portableCredential: true, nativeSandbox: true, broker: true, secretService: false }
   },
   agy: {
@@ -58,6 +65,8 @@ export const ENGINE_DESCRIPTORS = {
     training: { subject: { supported: false, isolation: null, reason: "no verified per-agent sandbox" }, inferenceGrants: null },
     broker: null,
     requiredBinaries: ["agy", "dbus-daemon", "gnome-keyring-daemon"], homeDirectory: "", homeEnvironment: "ANTIGRAVITY_CLI_HOME",
+    // AGY keeps its login beside these (its OAuth token, installation id and `cache/`); none of them is listed.
+    diagnostics: { paths: [".gemini/antigravity-cli/log", ".gemini/antigravity-cli/cli.log", ".gemini/antigravity-cli/brain", ".gemini/antigravity-cli/conversations", ".gemini/antigravity-cli/crashes"] },
     capabilities: { portableCredential: false, nativeSandbox: false, broker: false, secretService: true }
   }
 } as const;

@@ -22,6 +22,13 @@ Keep the descriptor-source commit pinned independently of deployed images.
   expiration string. These are structural refresh checks, not live login probes.
   Pi OAuth bridging additionally needs a nested account id; the broker credential
   reader has its own stricter single-entry/token-length validation.
+- `diagnostics.paths` lists the engine's own records of its turns (session
+  transcripts, CLI logs), relative to the agent runtime home, for a consumer
+  that keeps a run's evidence after its container is gone. A listed path may be
+  absent on a given run. It never lists a credential, a login file or a
+  directory holding one: AGY keeps its login beside its records, so its entries
+  are named one by one and never its whole CLI home. A consumer still owns
+  collection, bounds and scrubbing.
 - `modelSelection` describes organization-runtime declarations. Codex accepts
   any nonblank model string and a closed effort vocabulary. Null defaults mean
   Daimon supplies no CLI override. AGY exposes neither option. Grok accepts
