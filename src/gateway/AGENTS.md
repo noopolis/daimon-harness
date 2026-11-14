@@ -34,3 +34,6 @@ refreshes its login on its first bearer request whatever the expiry, once, and
 logs `daimon gateway: <engine> forced refresh rotated the login` (or `left the
 login unchanged`). It exists so a pilot can prove a mid-run rotation through the
 gateway without anyone touching a login file. Production never sets it.
+`grok models` leaves an unexpired login alone, so the Grok refresh seeds that
+one forced attempt's scratch home with `expires_at` in the past
+(`seedExpiredOnce`, `grokRefresh.ts`); the realm file is never marked.

@@ -174,6 +174,28 @@ test("a login the CLI rotated before failing is kept; an unchanged one lets the 
   assert.deepEqual(await readdir(scratch), []);
 });
 
+test("a forced refresh seeds the scratch login as expired once, and never returns the marked copy", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "daimon-grok-gw-expired-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const scratch = path.join(root, "scratch");
+  await mkdir(scratch, { mode: 0o700 });
+  const command = path.join(root, "grok");
+  // Like the real CLI: exchange the refresh token only when the login reads as expired.
+  await writeFile(command, `#!/bin/sh\ngrep -q generation-0 "$GROK_HOME/auth.json" || exit 8\ngrep -q 1970-01-01 "$GROK_HOME/auth.json" || exit 0\n[ -f '${root}/offline' ] && exit 1\nprintf '%s' '${login(1).toString("utf8")}' > "$GROK_HOME/auth.json"\n`);
+  await chmod(command, 0o700);
+  const current = parseGrokAuth(login(0));
+  assert.equal((await createGrokRefresh({ command, scratchRoot: scratch })(current)).digest, current.digest, "an unexpired login is left alone");
+  const forced = createGrokRefresh({ command, scratchRoot: scratch, seedExpiredOnce: true });
+  assert.equal((await forced(current)).accessToken, token(1), "the first forced refresh rotates");
+  assert.equal((await forced(current)).digest, current.digest, "only the first refresh is seeded expired");
+  await writeFile(path.join(root, "offline"), "");
+  await assert.rejects(createGrokRefresh({ command, scratchRoot: scratch, seedExpiredOnce: true })(current), "a failed exchange never returns the marked copy");
+  await rm(path.join(root, "offline"));
+  await writeFile(command, "#!/bin/sh\nexit 0\n");
+  assert.equal(await createGrokRefresh({ command, scratchRoot: scratch, seedExpiredOnce: true })(current), current, "a CLI that ignores the mark left the login unchanged");
+  assert.deepEqual(await readdir(scratch), []);
+});
+
 test("a crashed gateway's scratch homes are swept at start; other entries stay", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-grok-gw-sweep-"));
   t.after(() => rm(root, { recursive: true, force: true }));
