@@ -31,3 +31,16 @@ arrives (`cliStderrLog.ts`): every line, credentials redacted, prefixed
 carries only the bounded head and tail (`CLI_ENGINE_MAX_DIAGNOSTIC_BYTES`); the
 runtime log is the full account, kept by whoever keeps the container's log.
 Stdout is the engine's transcript and stays in the engine's own home.
+
+The per-wake MCP mount (`cliSessionMcp.ts`) serves any number of client
+sessions, each with its own server and transport over the same tools and one
+shared tool-turn count. AGY 1.1.22 opens one session to write the tool schemas
+and another for the conversation that calls them; a single-session transport
+refused the second `initialize`, so the model was told its tools by name and
+given none. Sessions are bounded by `MAX_MCP_SESSIONS`.
+
+A CLI engine's whole stdout is kept per wake in the agent's runtime home
+(`cliStdoutRecord.ts`, `ENGINE_OUTPUT_RECORD_DIRECTORY`): credentials redacted,
+the newest `ENGINE_OUTPUT_RECORDS_KEPT` wakes, each bounded. It is advisory and
+never fails a turn. The descriptors declare the directory in
+`diagnostics.paths`.

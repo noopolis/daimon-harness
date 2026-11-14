@@ -1,3 +1,4 @@
+import { parseProtocolLines, type StrayOutputSink } from "../protocolLines.js";
 type JsonRecord = Readonly<Record<string, unknown>>;
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -111,16 +112,14 @@ export const decodeCodexTurnUsage = (frame: JsonRecord, calls: number): CodexTur
  * the turn; the latter gets its own detail string so a genuinely truncated
  * stream is never confused with a legitimately silent one.
  */
-export const decodeCodexHeadlessTurn = (output: string): CodexHeadlessTurn => {
-  const lines = output.split(/\r?\n/).filter((line) => line.trim().length > 0);
+export const decodeCodexHeadlessTurn = (output: string, onStray?: StrayOutputSink): CodexHeadlessTurn => {
+  const lines = parseProtocolLines("codex", output, onStray);
   if (lines.length === 0) throw invalidResult("empty stream");
   let text: string | undefined;
   const completed: JsonRecord[] = [];
   let failed = false;
   let calls = 0;
-  for (const line of lines) {
-    let frame: unknown;
-    try { frame = JSON.parse(line); } catch { throw invalidResult("invalid JSON"); }
+  for (const frame of lines) {
     if (!isRecord(frame) || typeof frame.type !== "string") throw invalidResult("invalid event");
     if (frame.type === "turn.failed") {
       failed = true;

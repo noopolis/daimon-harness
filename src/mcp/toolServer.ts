@@ -105,9 +105,16 @@ const validateOptions = (options: PiToolMcpServerOptions): void => {
   }
 };
 
+/**
+ * Tool turns one wake has spent, shared by every server of that wake's mount: a client that opens several
+ * sessions (AGY does) still draws on one `maxToolTurns` budget.
+ */
+export interface PiToolTurnCount { used: number }
+
 export const createPiToolMcpServer = (
   tools: ToolDefinition[],
-  options: PiToolMcpServerOptions
+  options: PiToolMcpServerOptions,
+  turns: PiToolTurnCount = { used: 0 }
 ): Server => {
   validateOptions(options);
   const server = new Server({ name: "daimon-pi-tools", version: "0.1.2" });
@@ -121,7 +128,6 @@ export const createPiToolMcpServer = (
     const schema = jsonSchema(tool.parameters);
     return [tool.name, new Ajv2020({ strict: false }).compile(schema)];
   }));
-  let toolTurns = 0;
 
   server.registerCapabilities({ tools: { listChanged: true } });
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -137,7 +143,7 @@ export const createPiToolMcpServer = (
     async (request, extra: RequestHandlerExtra<ServerRequest, ServerNotification>) => {
       try {
         if (options.wakeDeadline !== undefined && Date.now() >= options.wakeDeadline) throw new McpWakeDeadlineError();
-        if (options.maxToolTurns !== undefined && toolTurns >= options.maxToolTurns) throw new McpToolTurnLimitError(options.maxToolTurns);
+        if (options.maxToolTurns !== undefined && turns.used >= options.maxToolTurns) throw new McpToolTurnLimitError(options.maxToolTurns);
         const tool = tools.find((candidate) => candidate.name === request.params.name);
         const validator = validators.get(request.params.name);
         if (tool === undefined || validator === undefined) {
@@ -147,7 +153,7 @@ export const createPiToolMcpServer = (
         if (!validator(args)) {
           throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for tool ${tool.name}: ${schemaViolations(validator)}`);
         }
-        toolTurns += 1;
+        const toolTurn = turns.used += 1;
         // Ajv validated this value against this tool's own schema immediately above.
         const validatedArgs = args as Parameters<typeof tool.execute>[1];
         const deadlineController = options.wakeDeadline === undefined ? undefined : new AbortController();
@@ -160,7 +166,7 @@ export const createPiToolMcpServer = (
         });
         let result: Awaited<ReturnType<typeof tool.execute>>;
         try {
-          const execution = tool.execute(`mcp-tool-turn-${toolTurns}`, validatedArgs, signal, undefined, NO_PI_EXTENSION_CONTEXT);
+          const execution = tool.execute(`mcp-tool-turn-${toolTurn}`, validatedArgs, signal, undefined, NO_PI_EXTENSION_CONTEXT);
           result = deadline === undefined ? await execution : await Promise.race([execution, deadline]);
         } finally {
           if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);

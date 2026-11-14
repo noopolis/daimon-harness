@@ -4,25 +4,18 @@ import { redactCredentialText } from "../core/credentialRedaction.js";
 export const CLI_STDERR_LOG_MAX_LINE_BYTES = 64 * 1024;
 
 /**
- * The whole stderr of a CLI engine child, forwarded to the runtime's own
- * stderr as it arrives: every line, credentials redacted, prefixed so the
- * lines of concurrent wakes stay attributable.
- *
- * A failed wake's error keeps only a bounded head and tail of this stream
- * (`CLI_ENGINE_MAX_DIAGNOSTIC_BYTES`), which is enough to label a failure and
- * not enough to diagnose one. The runtime's stderr is the log its operator
- * already keeps, so the full account lands there and nothing new is stored.
+ * A child's byte stream as whole lines with credentials redacted, in bounded memory: `emit` gets each line
+ * (without its line end) once it is complete, and no secret is ever cut in two across chunks.
  */
-export const createCliStderrLog = (
-  label: string,
+export const createRedactedLineStream = (
   secretValues: readonly string[],
-  write: (text: string) => void = (text) => { process.stderr.write(text); }
+  emit: (line: string) => void
 ): Readonly<{ observe(chunk: Buffer): void; finish(): void }> => {
   let held = "";
   const secrets = secretValues.filter((secret) => secret.length > 0);
-  const emit = (line: string): void => {
+  const redacted = (line: string): void => {
     const text = redactCredentialText(line.replace(/\r$/u, ""), secrets, Number.MAX_SAFE_INTEGER);
-    if (text.length > 0) write(`daimon: engine stderr ${label} | ${text}\n`);
+    if (text.length > 0) emit(text);
   };
   /** The longest end of `text` that could be the start of a secret still arriving: held back so no secret is cut in two. */
   const pendingSecret = (text: string): number => {
@@ -39,16 +32,33 @@ export const createCliStderrLog = (
       held += chunk.toString("utf8");
       const lines = held.split("\n");
       held = lines.pop()!;
-      for (const line of lines) emit(line);
+      for (const line of lines) redacted(line);
       if (Buffer.byteLength(held, "utf8") > CLI_STDERR_LOG_MAX_LINE_BYTES) {
         const cut = held.length - pendingSecret(held);
-        emit(held.slice(0, cut));
+        redacted(held.slice(0, cut));
         held = held.slice(cut);
       }
     },
     finish() {
-      emit(held);
+      redacted(held);
       held = "";
     }
   };
 };
+
+/**
+ * The whole stderr of a CLI engine child, forwarded to the runtime's own
+ * stderr as it arrives: every line, credentials redacted, prefixed so the
+ * lines of concurrent wakes stay attributable.
+ *
+ * A failed wake's error keeps only a bounded head and tail of this stream
+ * (`CLI_ENGINE_MAX_DIAGNOSTIC_BYTES`), which is enough to label a failure and
+ * not enough to diagnose one. The runtime's stderr is the log its operator
+ * already keeps, so the full account lands there and nothing new is stored.
+ */
+export const createCliStderrLog = (
+  label: string,
+  secretValues: readonly string[],
+  write: (text: string) => void = (text) => { process.stderr.write(text); }
+): Readonly<{ observe(chunk: Buffer): void; finish(): void }> =>
+  createRedactedLineStream(secretValues, (line) => { write(`daimon: engine stderr ${label} | ${line}\n`); });

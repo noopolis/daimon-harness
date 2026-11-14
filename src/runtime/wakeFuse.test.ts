@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { fuseTokens } from "./wakeFuseLedger.js";
 import { WakeFuse, WAKE_FUSE_VERSION } from "./wakeFuse.js";
 
 const withDirectory = async (body: (directory: string) => Promise<void>): Promise<void> => {
@@ -240,6 +241,24 @@ test("usage rows sharing a broker turn key count once toward the token ceiling",
   const now = () => new Date("2026-08-30T00:00:00.000Z");
   const fuse = await WakeFuse.open({ organizationKey: "org", environment: environment(directory), now });
   assert.deepEqual(await fuse.admit("alpha", "one"), { state: "admitted" });
+}));
+
+test("a long turn's cached reads weigh a tenth, so its retry is admitted and the ceiling still binds", async () => await withDirectory(async (directory) => {
+  const now = () => new Date("2026-08-30T00:00:00.000Z");
+  // The AGY turn of the 2026-11-14 pilot: 0.79M fresh input, 0.12M output, 27.7M cached reads in 236 steps.
+  const turn = { at: "2026-08-30T00:00:00.000Z", agent: "alpha", input: 787_603, output: 115_613, cache_read: 27_673_646, total: 28_576_862 };
+  await writeFile(path.join(directory, "usage.jsonl"), `${JSON.stringify(turn)}\n`);
+  const fuse = await WakeFuse.open({ organizationKey: "org", environment: environment(directory, { DAIMON_WAKE_FUSE_MAX_TOKENS: "5000000", DAIMON_WAKE_FUSE_MAX_WAKES: "10" }), now });
+  // Mutation guard: counted in full, this one turn read 28.6M against 5M and parked its own retry.
+  assert.deepEqual(await fuse.admit("alpha", "retry"), { state: "admitted" });
+  assert.equal(fuseTokens(turn), 787_603 + 115_613 + 2_767_365);
+  // A second such turn passes the ceiling: cached reads are discounted, never free.
+  await writeFile(path.join(directory, "usage.jsonl"), `${JSON.stringify(turn)}\n${JSON.stringify({ ...turn, at: "2026-08-30T00:00:00.001Z" })}\n`);
+  assert.deepEqual(await fuse.admit("alpha", "third"), { state: "tripped", reason: "token_ceiling" });
+  // A row with no cache accounting counts in full, and a cache figure above the total cannot go negative.
+  assert.equal(fuseTokens({ total: 600 }), 600);
+  assert.equal(fuseTokens({ total: 100, cache_read: 500 }), 10);
+  assert.equal(fuseTokens({ total: -1, cache_read: 5 }), 0);
 }));
 
 // --- the counting window rolls itself -----------------------------------------

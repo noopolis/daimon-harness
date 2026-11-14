@@ -1,3 +1,4 @@
+import { CACHED_READ_TOKEN_WEIGHT } from "../../core/cachedTokenWeight.js";
 /**
  * Per-wake engine bounds, and the one place they are decided.
  *
@@ -33,7 +34,7 @@ export const DEFAULT_CODEX_WAKE_TOKEN_CEILING = 300_000;
  * were then failed at the 300k default. Fresh input and output still count in
  * full, as in the Grok broker's meter; the usage ledger keeps raw counts.
  */
-export const CODEX_CACHED_INPUT_TOKEN_WEIGHT = 0.1;
+export const CODEX_CACHED_INPUT_TOKEN_WEIGHT = CACHED_READ_TOKEN_WEIGHT;
 /** What a turn's reported usage costs against the per-wake token ceiling. */
 export const codexCeilingTokens = (usage: Readonly<{ total: number; cacheRead: number }>): number => {
   const cached = Math.min(usage.cacheRead, usage.total);

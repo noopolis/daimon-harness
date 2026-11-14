@@ -3,6 +3,8 @@ import { GROK_BROKER_TASK_CLOCK } from "./grok/broker/grokBrokerTaskClockContrac
 
 export const CODEX_HOME_DIRECTORY = ".codex";
 export const GROK_HOME_DIRECTORY = ".grok";
+/** Where a CLI engine's own stdout is kept per wake, relative to the agent runtime home (`pi/cliStdoutRecord.ts`). */
+export const ENGINE_OUTPUT_RECORD_DIRECTORY = ".local/state/daimon-engine-output";
 export const PORTABLE_AUTH_FILE_NAME = "auth.json";
 export const CODEX_SUBSCRIPTION_INTENT = { method: "codex", provider: "openai", piProvider: "openai-codex" } as const;
 

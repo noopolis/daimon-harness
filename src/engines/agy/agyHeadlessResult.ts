@@ -1,3 +1,4 @@
+import { parseProtocolLines, type StrayOutputSink } from "../protocolLines.js";
 import { decodeAgyStepRequests, type AgyStepRequest } from "./agyTurnRequests.js";
 
 type JsonRecord = Readonly<Record<string, unknown>>;
@@ -116,14 +117,12 @@ const decodeAgyTurnUsage = (result: JsonRecord): AgyTurnUsage | undefined => {
  * stream and a frame kind added later must not fail a turn that published.
  * The terminal `result` frame must be the last line, exactly as with Grok.
  */
-export const decodeAgyHeadlessTurn = (output: string): AgyHeadlessTurn => {
-  const lines = output.split(/\r?\n/).filter((line) => line.length > 0);
+export const decodeAgyHeadlessTurn = (output: string, onStray?: StrayOutputSink): AgyHeadlessTurn => {
+  const lines = parseProtocolLines("agy", output, onStray);
   if (lines.length === 0) throw invalidResult("empty stream");
   let result: JsonRecord | undefined;
   const progress: JsonRecord[] = [];
-  for (const [index, line] of lines.entries()) {
-    let frame: unknown;
-    try { frame = JSON.parse(line); } catch { throw invalidResult("invalid JSON"); }
+  for (const [index, frame] of lines.entries()) {
     if (!isRecord(frame) || typeof frame.event !== "string") throw invalidResult("invalid event");
     if (frame.event !== "result") { progress.push(frame); continue; }
     if (index !== lines.length - 1) throw invalidResult("non-terminal result");

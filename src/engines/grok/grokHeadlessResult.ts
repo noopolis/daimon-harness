@@ -1,3 +1,4 @@
+import { parseProtocolLines, type StrayOutputSink } from "../protocolLines.js";
 const PUBLISHABLE_STOP_REASONS = new Set(["end_turn", "stop_sequence"]);
 
 type JsonRecord = Readonly<Record<string, unknown>>;
@@ -101,14 +102,12 @@ const decodeTerminalAssistant = (event: JsonRecord): TerminalAssistant | undefin
  * Decode Grok's terminal message stream without treating progress messages as a
  * reply, and extract the turn's own token accounting from the same frame.
  */
-export const decodeGrokHeadlessTurn = (output: string): GrokHeadlessTurn => {
-  const lines = output.split(/\r?\n/).filter((line) => line.length > 0);
+export const decodeGrokHeadlessTurn = (output: string, onStray?: StrayOutputSink): GrokHeadlessTurn => {
+  const lines = parseProtocolLines("grok", output, onStray);
   if (lines.length === 0) throw invalidResult("empty stream");
   let finalAssistant: TerminalAssistant | undefined;
   let result: JsonRecord | undefined;
-  for (const [index, line] of lines.entries()) {
-    let event: unknown;
-    try { event = JSON.parse(line); } catch { throw invalidResult("invalid JSON"); }
+  for (const [index, event] of lines.entries()) {
     if (!isRecord(event) || typeof event.type !== "string") throw invalidResult("invalid event");
     if (event.type === "error") {
       const rejection = asGrokAuthenticationRejected(JSON.stringify(event));
