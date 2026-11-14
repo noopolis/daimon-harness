@@ -1,6 +1,6 @@
 {
   "name": "@noopolis/daimon",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "Noopolis native per-agent runtime harness built on Pi.",
   "license": "MIT",
   "type": "module",
