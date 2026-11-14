@@ -10,6 +10,7 @@ import {
   readChild,
   spawnEngine
 } from "./cliSession.js";
+import { createCliStderrLog } from "./cliStderrLog.js";
 
 test("verbose progress stderr is drained without invalidating a bounded successful reply", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "daimon-cli-stderr-progress-"));
@@ -131,3 +132,30 @@ test("redacts a 2000-byte exact secret before retaining a failed stderr tail", a
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+
+test("a failed child's whole stderr reaches the runtime log, where its error keeps only an excerpt", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "daimon-cli-stderr-log-"));
+  const engine = path.join(root, "verbose-failure.mjs");
+  const secret = "whole-log-secret-value";
+  const lines = 4_000;
+  await writeFile(engine, [
+    `for (let index = 0; index < ${lines}; index++) process.stderr.write("step " + index + " refused by the provider\\n");`,
+    `process.stderr.write(${JSON.stringify(`final-error ${secret}
+`)});`,
+    "process.exitCode = 7;"
+  ].join("\n"));
+  try {
+    const logged: string[] = [];
+    const log = createCliStderrLog("engine=agy wake=w-1", [secret], (text) => { logged.push(text); });
+    const child = spawnEngine({ command: process.execPath, commandArgs: [engine], engine: "agy", maxToolTurns: 1, timeoutMs: 10_000 }, "verbose", { cwd: root }, undefined);
+    const failure = await readChild(child, 10_000, [secret], { onStderrData: log.observe }).then(() => undefined, (error: Error) => error);
+    log.finish();
+    assert.ok(failure instanceof Error && Buffer.byteLength(failure.message) <= CLI_ENGINE_MAX_DIAGNOSTIC_BYTES + 80);
+    // Mutation guard: without the forward, the middle of the stream exists nowhere once the child is gone.
+    assert.equal(logged.length, lines + 1);
+    assert.equal(logged[1_999], "daimon: engine stderr engine=agy wake=w-1 | step 1999 refused by the provider\n");
+    assert.equal(logged.at(-1), "daimon: engine stderr engine=agy wake=w-1 | final-error [REDACTED]\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
