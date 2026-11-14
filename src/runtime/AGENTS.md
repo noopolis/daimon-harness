@@ -1140,3 +1140,10 @@ copy while this agent is idle, **without locks**: concurrent writers to shared
 roots (another agent or long-lived MCP server) can tear files mid-copy or mix
 states across files. Detected mutation fails the root, but it is not an atomic
 filesystem snapshot. Consumers must never mutate hard-linked snapshot files.
+
+The wake fuse counts a usage row's tokens through `fuseTokens`
+(`wakeFuseLedger.ts`): fresh input and output in full, cached reads at a tenth
+(`CACHED_READ_FUSE_WEIGHT`). A long turn re-reads its context from cache on every
+step; counted in full, one such turn passed the organization ceiling and parked
+its own retry. Cached reads are discounted, never free, so a loop over a cached
+context still meets the ceiling.

@@ -3,6 +3,32 @@ import { open, readFile } from "node:fs/promises";
 
 import { TURN_USAGE_LEDGER } from "./turnUsageLedger.js";
 
+/** What a token read back from the provider's cache weighs against a fuse ceiling, beside a fresh one. */
+export const CACHED_READ_FUSE_WEIGHT = 0.1;
+
+/**
+ * The tokens one usage row spends against a fuse ceiling: everything the model
+ * processed fresh (input not served from cache, output) in full, and cached
+ * reads at a tenth.
+ *
+ * A multi-step turn re-reads its whole context from cache on every step, so its
+ * cached reads grow with the square of its length: one 236-step AGY turn that
+ * read 0.8M fresh tokens and wrote 0.1M reported 27.7M cached reads. Counted in
+ * full, that single turn passed a 5M organization ceiling five times over and
+ * parked its own retry, on tokens the provider serves at about a tenth of the
+ * price. Counted at zero, a loop over a fully cached context would never meet
+ * the ceiling at all. A tenth keeps the ceiling a real bound on both.
+ *
+ * Every engine's row `total` already includes its cached reads (as part of
+ * `input` or beside it), so the weight is taken off the total. A row without
+ * `cache_read` counts in full, as before.
+ */
+export const fuseTokens = (row: { total?: unknown; cache_read?: unknown }): number => {
+  if (typeof row.total !== "number" || !Number.isFinite(row.total) || row.total < 0) return 0;
+  const cached = typeof row.cache_read === "number" && Number.isFinite(row.cache_read) && row.cache_read > 0 ? Math.min(row.cache_read, row.total) : 0;
+  return Math.ceil(row.total - cached * (1 - CACHED_READ_FUSE_WEIGHT));
+};
+
 /** Usage-ledger reads the wake fuse depends on; split out of `wakeFuse.ts` for its size bound. */
 export async function sumTokens(ledgerPath: string, since: string, agentId?: string): Promise<number> {
   let total = 0;
@@ -11,11 +37,11 @@ export async function sumTokens(ledgerPath: string, since: string, agentId?: str
   for (const file of [`${ledgerPath}.1`, ledgerPath]) {
     for (const line of await lines(file)) {
       try {
-        const value = JSON.parse(line) as { at?: unknown; total?: unknown; agent?: unknown; turn?: unknown; kind?: unknown };
+        const value = JSON.parse(line) as { at?: unknown; total?: unknown; cache_read?: unknown; agent?: unknown; turn?: unknown; kind?: unknown };
         // Evaluator inference rows belong to their own ledger; one here (a misconfigured path) is never subject spend.
         if (value.kind === "inference") continue;
         if (typeof value.turn === "string") { if (turns.has(value.turn)) continue; turns.add(value.turn); }
-        if ((agentId === undefined || value.agent === agentId) && typeof value.at === "string" && !Number.isNaN(Date.parse(value.at)) && value.at >= since && typeof value.total === "number" && Number.isFinite(value.total) && value.total >= 0) total += value.total;
+        if ((agentId === undefined || value.agent === agentId) && typeof value.at === "string" && !Number.isNaN(Date.parse(value.at)) && value.at >= since) total += fuseTokens(value);
       } catch { /* usage accounting is advisory input; malformed lines are skipped */ }
     }
   }
