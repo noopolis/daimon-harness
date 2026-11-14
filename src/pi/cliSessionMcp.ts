@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createPiToolMcpServer } from "../mcp/toolServer.js";
+import { createPiToolMcpServer, type PiToolTurnCount } from "../mcp/toolServer.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+
+/** Sessions one wake's mount holds at once: far above any engine's own use, and a bound on a misbehaving client. */
+export const MAX_MCP_SESSIONS = 16;
+
+type MountedSession = { server: ReturnType<typeof createPiToolMcpServer>; transport: StreamableHTTPServerTransport };
 
 export const startMcp = async (
   tools: ToolDefinition[],
@@ -12,10 +17,48 @@ export const startMcp = async (
   onStarted: (mount: { endpoint: string; close: () => Promise<void> }) => void
 ): Promise<{ endpoint: string; close: () => Promise<void> }> => {
   onToolsMounted?.(tools);
-  const mcpServer = createPiToolMcpServer(tools, { maxToolTurns, wakeDeadline });
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+  // One wake, one tool-turn budget, any number of client sessions. An engine may connect more than once in a
+  // turn: AGY 1.1.22 opens one session to materialize the tool schemas and another for the conversation that
+  // calls them. A single-session transport answered the second `initialize` with 400, so the model was told
+  // its tools by name and given none of them. Every session gets its own server and transport over the same
+  // tools and the same shared count.
+  const turns: PiToolTurnCount = { used: 0 };
+  const sessions = new Map<string, MountedSession>();
+  const pending = new Set<MountedSession>();
+  const dispose = async (session: MountedSession): Promise<void> => {
+    await session.transport.close().catch(() => undefined);
+    await session.server.close().catch(() => undefined);
+  };
+  const refuse = (response: ServerResponse, status: number, message: string): void => {
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message }, id: null }));
+  };
+  const openSession = async (): Promise<MountedSession> => {
+    const server = createPiToolMcpServer(tools, { maxToolTurns, wakeDeadline }, turns);
+    const session: MountedSession = { server, transport: new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => { pending.delete(session); sessions.set(id, session); },
+      onsessionclosed: (id) => { sessions.delete(id); }
+    }) };
+    pending.add(session);
+    await server.connect(session.transport);
+    return session;
+  };
+  const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    const header = request.headers["mcp-session-id"];
+    const id = Array.isArray(header) ? header[0] : header;
+    const known = id === undefined ? undefined : sessions.get(id);
+    if (known !== undefined) return known.transport.handleRequest(request, response);
+    if (id !== undefined) return refuse(response, 404, "Session not found");
+    if (cancelled) return refuse(response, 503, "MCP mount is closing");
+    if (sessions.size + pending.size >= MAX_MCP_SESSIONS) return refuse(response, 503, "Too many MCP sessions for one wake");
+    const session = await openSession();
+    // Anything but `initialize` is refused by the transport and leaves no session behind.
+    response.once("close", () => { if (pending.delete(session)) void dispose(session); });
+    return session.transport.handleRequest(request, response);
+  };
   const httpServer: Server = createServer((request, response) => {
-    void transport.handleRequest(request, response);
+    void handle(request, response).catch(() => { if (!response.headersSent) refuse(response, 500, "MCP mount failed"); else response.end(); });
   });
   let lifecycle: "starting" | "listening" | "closing" | "closed" = "starting";
   let cancelled = false;
@@ -29,8 +72,8 @@ export const startMcp = async (
     // `listen()` begins synchronously but its callback is pending. Waiting for
     // startup prevents dispose from returning while that callback can still bind.
     await startupSettled;
-    await transport.close().catch(() => undefined);
-    await mcpServer.close().catch(() => undefined);
+    await Promise.all([...sessions.values(), ...pending].map(dispose));
+    sessions.clear(); pending.clear();
     // `close` only stops accepting and then waits for every open connection,
     // including the ones the transport has no record of and so cannot end (a
     // socket opened before `initialize`, or a client pool's idle keep-alive
@@ -48,8 +91,6 @@ export const startMcp = async (
   onStarted(mount);
   let startupError: unknown;
   try {
-    if (cancelled) throw new Error("MCP startup was cancelled");
-    await mcpServer.connect(transport);
     if (cancelled) throw new Error("MCP startup was cancelled");
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => reject(error);
