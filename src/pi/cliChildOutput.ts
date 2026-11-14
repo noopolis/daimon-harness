@@ -85,6 +85,8 @@ export const readChild = (
     timeoutErrorMessage?: string;
     /** Every stdout chunk as it arrives, before retention; for an engine meter that must outlive a killed child. */
     onStdoutData?: (chunk: Buffer) => void;
+    /** Every stderr chunk as it arrives, whole: the failure diagnostic below keeps only a bounded head and tail of it. */
+    onStderrData?: (chunk: Buffer) => void;
   }> & CodexChildOutputOptions = {}
 ): Promise<string> => new Promise((resolve, reject) => {
   trackCliChild(child);
@@ -174,6 +176,7 @@ export const readChild = (
   };
   const retainStderrWindow = (chunk: Buffer): void => {
     const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    options.onStderrData?.(value);
     classifyFailure(value);
     stderrBytes += value.length;
     if (stderrHead.length < stderrHeadBytes) stderrHead = Buffer.concat([stderrHead, value.subarray(0, stderrHeadBytes - stderrHead.length)]);

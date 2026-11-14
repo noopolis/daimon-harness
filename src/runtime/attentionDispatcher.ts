@@ -173,6 +173,9 @@ export class AttentionDispatcher {
       await mutation;
       const executionError = result.status === "rejected" ? `wake rejected: ${result.code}`
         : result.status === "failed" ? `engine_failed: ${result.detail ?? "engine execution failed"}` : null;
+      // Every failed execution says why on the runtime's own log, the retry's as well: once the delivery is
+      // deferred its record is the only other account, and that one is replaced by the next failure.
+      if (executionError !== null) console.error(`daimon: wake execution failed agent=${agent.id} execution=${executionId} deliveries=${claimed.map((item) => item.record.delivery_id).join(",")}: ${sanitizeExecutionError(executionError)}`);
       for (const item of claimed.filter((value) => !value.done)) {
         // Returned to the inbox for restart, and recording WHY. Only a WAKE OUTCOME
         // decides this: `stopped` — which an aborted in-flight wake also carries, with
