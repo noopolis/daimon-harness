@@ -28,8 +28,8 @@ type MeteredTurn = Readonly<{ usage: AgyTurnUsage | CodexTurnUsage; outcome: Tur
 
 const frame = (value: unknown): string => `process.stdout.write(${JSON.stringify(`${JSON.stringify(value)}\n`)});`;
 const reply = (text: string): string => frame({ type: "item.completed", item: { type: "agent_message", text } });
-const completed = (input: number, output: number): string =>
-  frame({ type: "turn.completed", usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: output, reasoning_output_tokens: 0 } });
+const completed = (input: number, output: number, cached = 0): string =>
+  frame({ type: "turn.completed", usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output, reasoning_output_tokens: 0 } });
 const stayAlive = "setInterval(() => undefined, 1000);";
 
 /**
@@ -78,6 +78,27 @@ test("a clean Codex completion still meters exactly one turn, marked completed",
     assert.equal(run.metered[0].usage.total, 8_120);
     assert.equal(run.metered[0].usage.input, 8_000);
     assert.equal(run.metered[0].usage.output, 120);
+  } finally { await run.cleanup(); }
+});
+
+test("a Codex turn whose reported usage is mostly cached reads stays under its token ceiling", async () => {
+  // The largest of eight training turns that filed their work and were then failed at the 300k default:
+  // 1,030,808 tokens reported, 954,880 of them cached re-reads of the turn's own conversation.
+  const run = await runCodexWake("cached", [reply("filed"), completed(1_025_067, 5_741, 954_880)], { codexTokenCeiling: 300_000 });
+  try {
+    assert.equal(run.failure, undefined);
+    assert.deepEqual(run.metered[0].outcome, { status: "completed" });
+    assert.equal(run.metered[0].usage.total, 1_030_808, "the ledger keeps the raw count");
+    assert.equal(run.metered[0].usage.cacheRead, 954_880);
+  } finally { await run.cleanup(); }
+});
+
+test("fresh Codex tokens still breach the ceiling beside cached reads", async () => {
+  const run = await runCodexWake("fresh", [reply("over budget"), completed(900_000, 10_000, 600_000), stayAlive], { codexTokenCeiling: 300_000 });
+  try {
+    assert.ok(run.failure instanceof Error);
+    assert.match(run.failure.message, /910000 tokens, 370000 counted/u);
+    assert.deepEqual(run.metered[0].outcome, { status: "failed", reason: "token_ceiling" });
   } finally { await run.cleanup(); }
 });
 

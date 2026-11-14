@@ -1,5 +1,6 @@
 import { decodeCodexTurnUsage, type CodexTurnUsage } from "./codexHeadlessResult.js";
 import { tagCliChildFailure } from "../../pi/cliChildOutput.js";
+import { CODEX_CACHED_INPUT_TOKEN_WEIGHT, codexCeilingTokens } from "./piWakeLimits.js";
 import type { EngineOutputRetention } from "../piHooks.js";
 
 export type CodexChildOutputOptions = Readonly<{
@@ -10,7 +11,8 @@ export type CodexChildOutputOptions = Readonly<{
      * Codex's `--json` stream reports usage exactly once, on `turn.completed`
      * — there is no incremental total to watch mid-turn — so this is
      * enforced at the earliest and only moment the crossing is observable:
-     * the instant that frame is parsed off the stream. Crossing it kills the
+     * the instant that frame is parsed off the stream. Cached prompt reads
+     * count at `CODEX_CACHED_INPUT_TOKEN_WEIGHT`. Crossing it kills the
      * child immediately (rather than letting an over-budget turn resolve as
      * a normal success) and fails the wake with a bound-named error.
      */
@@ -84,8 +86,8 @@ export const createCodexOutputRetention = (
             // has to leave the reader before the child does.
             const usage = decodeCodexTurnUsage(frame, ndjsonCalls);
             options.onCodexTurnCompleted?.(usage);
-            if (options.codexTokenCeiling !== undefined && usage !== undefined && usage.total >= options.codexTokenCeiling) {
-              abort(tagCliChildFailure(new Error(`Codex wake exceeded its ${options.codexTokenCeiling}-token per-wake ceiling (turn usage ${usage.total} tokens)`), "token_ceiling"));
+            if (options.codexTokenCeiling !== undefined && usage !== undefined && codexCeilingTokens(usage) >= options.codexTokenCeiling) {
+              abort(tagCliChildFailure(new Error(`Codex wake exceeded its ${options.codexTokenCeiling}-token per-wake ceiling (turn usage ${usage.total} tokens, ${codexCeilingTokens(usage)} counted with cached reads at ${CODEX_CACHED_INPUT_TOKEN_WEIGHT})`), "token_ceiling"));
               return;
             }
           }
