@@ -1,10 +1,9 @@
 import { constants } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 
+import { CACHED_READ_TOKEN_WEIGHT } from "../core/cachedTokenWeight.js";
 import { TURN_USAGE_LEDGER } from "./turnUsageLedger.js";
 
-/** What a token read back from the provider's cache weighs against a fuse ceiling, beside a fresh one. */
-export const CACHED_READ_FUSE_WEIGHT = 0.1;
 
 /**
  * The tokens one usage row spends against a fuse ceiling: everything the model
@@ -26,7 +25,7 @@ export const CACHED_READ_FUSE_WEIGHT = 0.1;
 export const fuseTokens = (row: { total?: unknown; cache_read?: unknown }): number => {
   if (typeof row.total !== "number" || !Number.isFinite(row.total) || row.total < 0) return 0;
   const cached = typeof row.cache_read === "number" && Number.isFinite(row.cache_read) && row.cache_read > 0 ? Math.min(row.cache_read, row.total) : 0;
-  return Math.ceil(row.total - cached * (1 - CACHED_READ_FUSE_WEIGHT));
+  return Math.ceil(row.total - cached * (1 - CACHED_READ_TOKEN_WEIGHT));
 };
 
 /** Usage-ledger reads the wake fuse depends on; split out of `wakeFuse.ts` for its size bound. */
