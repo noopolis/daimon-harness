@@ -8,6 +8,7 @@ import type { WakeEvent } from "../core/types.js";
 import { redactCredentialError, redactCredentialText } from "../core/credentialRedaction.js";
 import type { TurnUsageOutcome } from "../runtime/turnUsageLedger.js";
 import { readChild } from "./cliChildOutput.js";
+import { createCliStderrLog } from "./cliStderrLog.js";
 import { spawnEngine } from "./cliEngineSpawn.js";
 import type { CliMcpRegistration } from "./cliMcpRegistration.js";
 import { type AgyTurnUsage } from "../engines/agy/agyHeadlessResult.js";
@@ -203,13 +204,16 @@ class CliSession implements PiSessionLike {
       this.activeChild = child;
       // Attach terminal listeners synchronously. A fast local sentinel may
       // exit before an asynchronous post-spawn authority recheck completes.
+      // The engine's whole stderr goes to the runtime's own log; a failure's error carries only an excerpt.
+      const stderrLog = createCliStderrLog(`engine=${this.options.engine} wake=${this.wakeId ?? "none"}`, secretValues);
       const outputPromise = readChild(child, deadline === undefined ? undefined : Math.max(1, deadline - Date.now()), secretValues, {
         ...handler.childReadOptions(this.options),
+        onStderrData: stderrLog.observe,
         onCodexTurnCompleted: meter.observeCodexTurnCompleted,
         ...(engineMeter === undefined ? {} : { onStdoutData: engineMeter.observe }),
         onCodexThreadStarted: (threadId) => { codexThreadId = threadId; }
       });
-      void outputPromise.catch(() => undefined);
+      void outputPromise.then(stderrLog.finish, stderrLog.finish);
       await this.options.verifyRuntimePaths?.();
       await this.options.verifyExecutable?.();
       const childOutput = await outputPromise;

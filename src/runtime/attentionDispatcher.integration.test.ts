@@ -206,7 +206,23 @@ test("work a failed turn left undone is retried once at once and completes, with
     assert.equal(f.attempts, 2);
     assert.equal((await f.control.availability(token))!.agents[0]!.error, undefined);
     assert.ok(logged.some((line) => line.includes("daimon: wake requeued once agent=alpha delivery=revision")), logged.join("\n"));
+    assert.equal(logged.filter((line) => line.includes("daimon: wake execution failed agent=alpha") && line.includes("deliveries=revision: engine_failed: engine broker turn failed (limit_exceeded; limit=tokens)")).length, 1, logged.join("\n"));
     // Mutation guard: logging the raw execution error writes the credential to stderr.
+    assert.ok(logged.every((line) => !line.includes("secret-review-token")));
+  } finally { console.error = original; await f.cleanup(); }
+});
+
+test("every failed execution says why on the runtime log, the failed retry included", async () => {
+  const f = await fixture(); let attempt = 0; const logged: string[] = []; const original = console.error;
+  console.error = (...values: unknown[]) => { logged.push(values.map(String).join(" ")); };
+  try {
+    f.onTurn = async () => { throw new Error(`CLI engine exited 1: cause ${++attempt} Bearer secret-review-token`); };
+    await f.control.accept(request("twice", "work that fails twice"));
+    await until(async () => (await f.control.activityV2(token))!.items.some((item) => item.deferred === true));
+    const failures = logged.filter((line) => line.includes("daimon: wake execution failed agent=alpha"));
+    // Mutation guard: only the first failure was logged (as the requeue); the retry's cause existed nowhere but the record.
+    assert.equal(failures.length, 2, logged.join("\n"));
+    assert.ok(failures[0]!.includes("engine_failed: CLI engine exited 1: cause 1") && failures[1]!.includes("engine_failed: CLI engine exited 1: cause 2"));
     assert.ok(logged.every((line) => !line.includes("secret-review-token")));
   } finally { console.error = original; await f.cleanup(); }
 });

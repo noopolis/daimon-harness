@@ -24,3 +24,10 @@ transport's to end. Close the transport first, then end the remaining
 connections; never wait for the client to release them. A finished turn that
 parks here publishes nothing and dies to an outer deadline, which loses exactly
 the terminal evidence the turn existed to produce.
+
+A CLI engine child's whole stderr is forwarded to the runtime's own stderr as it
+arrives (`cliStderrLog.ts`): every line, credentials redacted, prefixed
+`daimon: engine stderr engine=<kind> wake=<id> |`. The wake's error still
+carries only the bounded head and tail (`CLI_ENGINE_MAX_DIAGNOSTIC_BYTES`); the
+runtime log is the full account, kept by whoever keeps the container's log.
+Stdout is the engine's transcript and stays in the engine's own home.

@@ -177,7 +177,7 @@ test("descriptor sandbox capabilities correspond to the real config and rendered
 
 test("manifest v7 emits the static inventory and preserves legacy aliases", () => {
   assert.equal(RUNTIME_CONTRACT_MANIFEST.version, "noopolis.daimon.runtime-contract-manifest.v7");
-  assert.equal(sha256(`${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`), "481f189e8b7d7e5927e215ed0d30d0d963b5b6d1677b87374bed929ee6a39608");
+  assert.equal(sha256(`${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`), "e6eedf2e83af312b33328ab3e768e888e132f53f6db3c1c6ce3768adff439da9");
   assert.equal(RUNTIME_CONTRACT_MANIFEST.engines, ENGINE_DESCRIPTORS);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokEngineBroker, grok.broker);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokSubscriptionRealm, grok.auth.realm);
@@ -189,4 +189,24 @@ test("manifest v7 retains every released v5 section byte-for-byte canonically", 
   const { engines: _engines, codexSubscriptionRealm: _codexRealm, ...legacy } = RUNTIME_CONTRACT_MANIFEST;
   const v5 = { ...legacy, version: "noopolis.daimon.runtime-contract-manifest.v5" };
   assert.equal(sha256(`${canonicalJson(v5)}\n`), "0e401c235b44e2c13b7b81676982e04d933de98d15c204141af3a715c07b5ebe");
+});
+
+test("declared diagnostics are plain paths inside the runtime home that never reach a login", () => {
+  // AGY's login lives in its CLI home beside its records: the OAuth token, the installation id and the onboarding cache.
+  const logins: Record<string, readonly string[]> = {
+    codex: [ENGINE_DESCRIPTORS.codex.credentialMaterial.destinationRelativePath, `${ENGINE_DESCRIPTORS.codex.homeDirectory}/${ENGINE_DESCRIPTORS.codex.auth.fileName}`],
+    grok: [ENGINE_DESCRIPTORS.grok.credentialMaterial.destinationRelativePath, `${ENGINE_DESCRIPTORS.grok.homeDirectory}/${ENGINE_DESCRIPTORS.grok.auth.fileName}`],
+    agy: [".gemini/antigravity-cli/antigravity-oauth-token", ".gemini/antigravity-cli/installation_id", ".gemini/antigravity-cli/cache"]
+  };
+  const within = (parent: string, child: string): boolean => child === parent || child.startsWith(`${parent}/`);
+  for (const id of ENGINE_IDS) {
+    const { paths } = ENGINE_DESCRIPTORS[id].diagnostics;
+    assert.ok(paths.length > 0 && paths.length <= 32, id);
+    assert.equal(new Set(paths).size, paths.length, id);
+    for (const entry of paths) {
+      assert.ok(!entry.startsWith("/") && entry.split("/").every((part) => part.length > 0 && part !== "." && part !== ".."), `${id}: ${entry}`);
+      assert.notEqual(path.posix.normalize(entry), ENGINE_DESCRIPTORS[id].homeDirectory, `${id}: the whole engine home holds its login`);
+      for (const login of logins[id]!) assert.ok(!within(entry, login) && !within(login, entry), `${id}: ${entry} reaches ${login}`);
+    }
+  }
 });
