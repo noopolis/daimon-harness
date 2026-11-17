@@ -151,6 +151,9 @@ with a `delivery_id` and `complete` or `defer` disposition. Reading a message or
 ending a turn never completes it. Unmarked and deferred messages wait durably
 for new input, including after restart. A single oversized delivery stays
 intact in the inbox tool and is referenced instead of copied into the prompt.
+`daimon_continue` with a short `note` schedules one fresh turn of the agent's
+own after the current one (one per turn, three in a chain), for work that
+should be checked with a clean context, such as write now and verify later.
 Omitting `attention` retains single-delivery, automatic completion behavior.
 Attention requires the durable control host and `POST /v2/wakes`; synchronous
 `POST /v1/wake` rejects attention-enabled agents with `durable_inbox_required`

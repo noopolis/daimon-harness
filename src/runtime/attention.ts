@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { readTaskClock, taskClockTimestamp } from "./taskClock.js";
 import type { StoredWakeAcceptanceRecord } from "./wakeAcceptanceRecord.js";
+import { MAX_SELF_CONTINUATION_NOTE_CODEPOINTS, MAX_SELF_CONTINUATIONS, type SelfContinuation } from "./selfContinuation.js";
 
 import type { AttentionConfig } from "../contracts/attentionContract.js";
 export type { AttentionConfig } from "../contracts/attentionContract.js";
@@ -11,6 +12,8 @@ export type AttentionTurn = Readonly<{
   messages: readonly AttentionMessage[];
   budget(): Promise<unknown>;
   disposition(deliveryId: string, disposition: "complete" | "defer"): Promise<void>;
+  /** Accepts one fresh turn of this agent's own, dispatched after this one ends. */
+  continueLater?(note: string): Promise<SelfContinuation>;
 }>;
 /** Owned by one control host; never shared across hosts or agent identities. */
 export type AttentionRegistry = Map<string, AttentionTurn>;
@@ -46,6 +49,15 @@ export function attentionTools(agentId: string, registry: AttentionRegistry): To
       if (input.disposition !== "complete" && input.disposition !== "defer") throw new Error("Invalid inbox disposition");
       await current().disposition(input.delivery_id, input.disposition);
       const details = { delivery_id: input.delivery_id, disposition: input.disposition };
+      return { content: [{ type: "text", text: JSON.stringify(details) }], details };
+    }
+  }, {
+    name: "daimon_continue", label: "Continue in a new turn", description: `Schedule one fresh turn of your own, started after this turn ends. The new turn begins with a clean context: it sees only this note, its inbox and your workspace files, never this turn's reasoning, so put what it needs in files and name them in the note. At most one per turn and ${MAX_SELF_CONTINUATIONS} in a chain; each turn counts against your execution allowance.`,
+    parameters: { type: "object", additionalProperties: false, required: ["note"], properties: { note: { type: "string", minLength: 1, maxLength: MAX_SELF_CONTINUATION_NOTE_CODEPOINTS } } },
+    async execute(_id, params) {
+      const turn = current();
+      if (!turn.continueLater) throw new Error("This turn cannot schedule a continuation");
+      const details = await turn.continueLater(String((params as { note?: unknown }).note ?? ""));
       return { content: [{ type: "text", text: JSON.stringify(details) }], details };
     }
   }] as ToolDefinition[];

@@ -10,6 +10,7 @@ import { ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS, ORGANIZATION_RUNTIME_MAX_WA
 import { getEngineHandler } from "../engines/registry.js";
 import { verifyHostRecordingStore, wakeFromDurableInbox } from "./organizationRuntimeAdmission.js";
 import { recordWakeMoment, type WakeMomentOptions } from "./wakeMomentRecorder.js";
+import { selfContinuationRequest, type SelfContinuation } from "./selfContinuation.js";
 
 type Claimed = { record: StoredWakeAcceptanceRecord; claim: WakeExecutionClaim; done: boolean };
 type Options = Readonly<{ store: WakeAcceptanceStore; host: OrganizationRuntimeHost; fuse: WakeFuse; agents: readonly OrganizationRuntimeAgentConfig[]; registry: AttentionRegistry; token: string | undefined; onIdle(agentId: string): void; recordingOptionsForTest?: WakeMomentOptions }>;
@@ -143,8 +144,18 @@ export class AttentionDispatcher {
     let result: OrganizationRuntimeWakeResult;
     try {
       const messages = taskClockAttentionMessages(claimed.map(({ record }) => record));
+      let continued: SelfContinuation | undefined;
       if (agent.attention !== undefined) registry.set(agent.id, {
         executionId, messages, budget: () => fuse.snapshot(agent.id, agent.attention),
+        // Accepted durably now, dispatched by this loop's next pass once the turn ends. Not new
+        // input: the generation stays, so deferred deliveries are not revisited for it.
+        continueLater: (note) => serialize(async () => {
+          if (continued) throw new Error(`This turn already scheduled its continuation (${continued.delivery_id})`);
+          const next = selfContinuationRequest({ token, agentId: agent.id, executionId, deliveryIds: claimed.map((item) => item.record.delivery_id), note, now: new Date() });
+          await store.accept(next.request);
+          continued = next.continuation;
+          return continued;
+        }),
         disposition: (deliveryId, disposition) => serialize(async () => {
           const item = claimed.find((value) => value.record.delivery_id === deliveryId);
           if (!item) throw new Error("Delivery is outside this agent's selected inbox turn");
