@@ -912,6 +912,11 @@ per-agent claim in `wakeAcceptanceStore.ts` atomically binds all selected ids
 before any record transition or engine invocation. Never restore batching by
 counting arrivals or marking read messages complete. `attention` is opt-in;
 unmarked/deferred deliveries wait for new input without a self-wake loop.
+The one explicit self-wake is `daimon_continue` (`selfContinuation.ts`): the
+agent accepts one `manual` delivery into its own inbox per execution, the chain
+link counted in its delivery id (`daimon-continue:<link>:<execution>`) and
+capped at `MAX_SELF_CONTINUATIONS`. It does not bump the inbox generation, so
+deferred deliveries are not revisited for it; the attention budget still bounds it.
 Live turn authority is `activity.executions`, independent of receipt completion;
 its execution id must equal the engine wake id. Budget pauses retain acceptance,
 and operator stop remains a hard latch.

@@ -279,6 +279,13 @@ both the 4,096-codepoint and 16,384-byte runtime limits, including the inbox
 wrapper. Larger selected payloads remain intact in `daimon_inbox`; the prompt
 instructs the agent to read them there.
 
+`daimon_continue({note})` lets an attention agent hand work to a fresh turn of
+its own: it durably accepts one `manual` delivery for the same agent, which the
+inbox dispatches after the current turn ends, as a new engine session that sees
+only the note, its inbox and the workspace. One continuation per execution and
+three links per chain; each continued turn counts against the attention budget.
+A continuation that never runs stays a durable pending delivery like any other.
+
 Rejected or failed executions also leave unfinished deliveries pending, but
 persist a bounded, credential-redacted diagnostic. `GET /v2/availability`
 reports that agent's `error` and a `paused` aggregate state, even after restart
