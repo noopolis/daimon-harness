@@ -5,6 +5,7 @@ import { engineFailureDetail } from "./organizationRuntimeHost.js";
 import { WakeAcceptanceStore, WakeExecutionClaimLostError, type WakeExecutionClaim } from "./wakeAcceptanceStore.js";
 import { sanitizeExecutionError, type StoredWakeAcceptanceRecord } from "./wakeAcceptanceRecord.js";
 import { STALE_QUEUED_DELIVERY_MS } from "./wakeAcceptanceRetention.js";
+import { isCurrentDreamOccurrence } from "./schedule.js";
 import { WakeFuse } from "./wakeFuse.js";
 import { ORGANIZATION_RUNTIME_MAX_STRING_CODEPOINTS, ORGANIZATION_RUNTIME_MAX_WAKE_TEXT_BYTES } from "../contracts/organizationRuntimeContract.js";
 import { getEngineHandler } from "../engines/registry.js";
@@ -95,8 +96,9 @@ export class AttentionDispatcher {
       this.errors.delete(agentId);
       if (!selected.length) return;
       // `holding`: a paused verdict here leaves this queue waiting, so the fuse announces the park.
-      const budget = await this.options.fuse.snapshot(agentId, agent.attention, true);
-      if (budget.state !== "available") return;
+      const head = selected[0]!;
+      const retired = head.native_schedule === "dream" && !isCurrentDreamOccurrence(agent, head.delivery_id, head.event.occurred_at, head.event.text);
+      if (!retired && (await this.options.fuse.snapshot(agentId, agent.attention, true)).state !== "available") return;
       if (this.paused) { this.pausedOut.add(agentId); return; }
       const executionId = selected[0]!.execution_id ?? randomUUID();
       const acquired = await this.options.store.acquireClaim(selected[0]!.acceptance_id, this.owner, selected.map((record) => record.acceptance_id), executionId);
@@ -109,6 +111,11 @@ export class AttentionDispatcher {
       if (claimed.some((item) => item.record.state !== "running")) {
         for (const item of claimed.filter((value) => value.record.state === "running")) await this.options.store.transitionClaimed(item.record.acceptance_id, item.claim, "accepted");
         await this.options.store.releaseClaim(claimed[0]!.claim); continue;
+      }
+      if (retired) {
+        try { await this.options.store.transitionClaimed(head.acceptance_id, acquired.claim, "stopped", "queued_wake_stopped"); }
+        finally { await this.options.store.releaseClaim(acquired.claim); }
+        continue;
       }
       // A drain that arrived after the claim releases it before any budget is spent.
       // Admission is the drain's linearization point: a turn the fuse admitted before
@@ -140,12 +147,16 @@ export class AttentionDispatcher {
         for (const item of claimed.filter((value) => !value.done)) await store.transitionClaimed(item.record.acceptance_id, item.claim, "running");
       }).catch((error) => this.failClosed(agent.id, error));
     }, store.claimHeartbeatIntervalMs());
-    this.active.set(agent.id, { execution_id: agent.attention === undefined ? claimed[0]!.record.delivery_id : executionId, delivery_ids: claimed.map((item) => item.record.delivery_id) });
+    const first = claimed[0]!.record;
+    const dream = first.native_schedule === "dream";
+    const attention = dream ? undefined : agent.attention;
+    const wakeId = agent.attention === undefined ? first.delivery_id : executionId;
+    this.active.set(agent.id, { execution_id: wakeId, delivery_ids: claimed.map((item) => item.record.delivery_id) });
     let result: OrganizationRuntimeWakeResult;
     try {
       const messages = taskClockAttentionMessages(claimed.map(({ record }) => record));
       let continued: SelfContinuation | undefined;
-      if (agent.attention !== undefined) registry.set(agent.id, {
+      if (attention !== undefined) registry.set(agent.id, {
         executionId, messages, budget: () => fuse.snapshot(agent.id, agent.attention),
         // Accepted durably now, dispatched by this loop's next pass once the turn ends. Not new
         // input: the generation stays, so deferred deliveries are not revisited for it.
@@ -168,15 +179,14 @@ export class AttentionDispatcher {
           item.done = true;
         })
       });
-      const first = claimed[0]!.record;
       if (agent.recording) {
-        await recordWakeMoment(agent, agent.attention === undefined ? first.delivery_id : executionId, claimed.map(({ record }) => record), { ...this.options.recordingOptionsForTest, verifyStore: () => verifyHostRecordingStore(host, agent.id) });
+        await recordWakeMoment(agent, wakeId, claimed.map(({ record }) => record), { ...this.options.recordingOptionsForTest, verifyStore: () => verifyHostRecordingStore(host, agent.id) });
       }
       result = await wakeFromDurableInbox(host, { token, agentId: agent.id, event: {
-        version: "noopolis.daimon.wake.v1", id: agent.attention === undefined ? first.delivery_id : executionId, kind: first.event.kind,
+        version: "noopolis.daimon.wake.v1", id: wakeId, kind: first.event.kind,
         occurredAt: messages[0]!.occurred_at,
-        text: agent.attention === undefined ? first.event.text : inboxPrompt(messages, agent.engine.kind, agent.attention.maxBatchBytes)
-      } });
+        text: attention === undefined ? first.event.text : inboxPrompt(messages, agent.engine.kind, attention.maxBatchBytes)
+      } }, dream ? "dream" : "awake");
     } catch (error) {
       result = { version: "noopolis.daimon.wake-result.v1", status: "failed", agentId: agent.id, wakeId: executionId, code: "engine_failed", detail: engineFailureDetail(error) };
     } finally { clearInterval(heartbeat); }
@@ -199,7 +209,7 @@ export class AttentionDispatcher {
         if (result.status === "stopped") {
           await store.transitionClaimed(item.record.acceptance_id, item.claim, "accepted", result.code);
         }
-        else if (agent.attention !== undefined) {
+        else if (attention !== undefined) {
           // Successful reading is not completion: an undisposed delivery of a
           // completed execution waits, deferred, for new input.
           //
@@ -258,8 +268,9 @@ export function selectBatch(records: readonly StoredWakeAcceptanceRecord[], agen
   const eligible = records.filter((record) => !record.deferred || revisitDeferred);
   const first = eligible[0];
   if (!first) return [];
+  if (first.native_schedule === "dream") return [first];
   // A durable execution identity survives a crash and partially completed batch.
-  if (first.execution_id !== undefined) return records.filter((record) => record.execution_id === first.execution_id);
+  if (first.execution_id !== undefined) return records.filter((record) => record.execution_id === first.execution_id && record.native_schedule !== "dream");
   if (agent.attention === undefined || first.event.kind !== "message") return [first];
   const selected: StoredWakeAcceptanceRecord[] = [];
   const count = agent.attention.maxBatchMessages ?? 8;

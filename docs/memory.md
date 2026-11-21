@@ -59,3 +59,28 @@ Organization-runtime config can declare memory per agent:
 In production CLI engines, the runtime passes this memory config into the same
 Pi harness layer that mounts production tools. The memory runtime remains
 in-process for Daimon; other runtimes can use Mneme through its own MCP server.
+
+### Scheduled dreams
+
+A v2 agent can give its memory bank a second schedule. This example requests
+a daily review at 03:00 UTC.
+
+```json
+{
+  "memory": {
+    "runtimeHomePath": "/runtime/memory/writer",
+    "dreamSchedule": {
+      "kind": "cron",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "prompt": "Review the bank and consolidate memories supported by evidence."
+    }
+  }
+}
+```
+
+An interval uses the same `kind: "every"` and `interval_ms` fields as a work
+schedule. The durable control host queues each occurrence for the agent.
+Each dream opens a fresh session on the configured bank. The next ordinary
+turn uses the agent's awake session. Omit `dreamSchedule` to leave maintenance
+off. The agent's top-level `schedule` independently controls ordinary work.
