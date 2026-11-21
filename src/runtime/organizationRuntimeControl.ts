@@ -1,3 +1,4 @@
+import { DREAM_DELIVERY_PREFIX, isCanonicalScheduleDeliveryId } from "./scheduleSlots.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readTaskClock } from "./taskClock.js";
 import { parseOrganizationRuntimeConfig, parseOrganizationRuntimeWakeRequest, wakeTextLimit, type OrganizationRuntimeConfig, type OrganizationRuntimeHost, type OrganizationRuntimeShutdownCompletion } from "./organizationRuntime.js";
@@ -78,11 +79,13 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
     const reason = fuse?.tripped();
     return reason === "operator_stop" || reason === "ledger_unavailable" ? reason : undefined;
   };
-  const accept = async (value: unknown, nativeSchedule = false): Promise<OrganizationRuntimeWakeAcceptanceResult> => {
+  const accept = async (value: unknown, nativeSchedule?: true | "dream"): Promise<OrganizationRuntimeWakeAcceptanceResult> => {
     let request;
     try { request = parseWakeAcceptanceRequest(value, wakeTextLimit(config)); } catch { return rejected("invalid_request"); }
     if (!tokensEqual(expectedToken, request.token)) return rejected("unauthorized");
     if (!knownAgents.has(request.agent_id)) return rejected("unknown_agent");
+    // A client retry must never reserve an occurrence belonging to a native dream timer.
+    if (!nativeSchedule && request.delivery_id.startsWith(DREAM_DELIVERY_PREFIX) && isCanonicalScheduleDeliveryId(request.delivery_id)) return rejected("delivery_conflict");
     // Check the operator latch before taking ownership, even between polls.
     await fuse?.pollOperatorStop();
     const reason = hardReason(); if (reason) return blocked(reason);
@@ -93,7 +96,8 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
         const accepted = await store!.accept(request, nativeSchedule);
         // A stop racing this fsync cannot revoke already durable ownership.
         // It remains accepted for restart instead of being terminalized.
-        dispatcher?.notify(request.agent_id, accepted.created);
+        if (nativeSchedule === "dream") dispatcher?.revisit([request.agent_id]);
+        else dispatcher?.notify(request.agent_id, accepted.created);
         return publicAcceptance(accepted.record);
       } catch (error) {
         if (error instanceof WakeAcceptanceConflictError) return rejected("delivery_conflict");
@@ -169,7 +173,7 @@ function createControl(config: OrganizationRuntimeConfig, host: OrganizationRunt
             now: () => { const realNow = (options.scheduleOptions?.now ?? Date.now)(); return clock?.at(realNow) ?? realNow; },
             accept: async (occurrence) => {
               if (dispatcher?.busy(occurrence.agentId) || hardReason() || drainedSince !== undefined) return false;
-              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: occurrence.occurredAt } }, true);
+              const result = await accept({ token: expectedToken, agent_id: occurrence.agentId, delivery_id: occurrence.deliveryId, event: { version: "noopolis.daimon.wake.v2", kind: "schedule", text: occurrence.prompt, occurred_at: occurrence.occurredAt } }, occurrence.dream ? "dream" : true);
               return result.state === "accepted";
             }
           });

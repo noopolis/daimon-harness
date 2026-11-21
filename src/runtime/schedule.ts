@@ -1,22 +1,27 @@
 import { assertTaskInstant, validTaskInstant } from "./taskClock.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
+import { ORGANIZATION_RUNTIME_MAX_AGENTS, ORGANIZATION_RUNTIME_MAX_CONFIG_BYTES } from "../contracts/organizationRuntimeContract.js";
 
-import type { OrganizationRuntimeAgentConfig, OrganizationRuntimeSchedule } from "./organizationRuntime.js";
+import type { OrganizationRuntimeAgentConfig } from "./organizationRuntime.js";
+
+import { DREAM_DELIVERY_PREFIX, dreamSlot, workScheduleKey, isCanonicalScheduleDeliveryId, type ActiveSchedule, type ScheduleSlot } from "./scheduleSlots.js";
+export { isCanonicalScheduleDeliveryId } from "./scheduleSlots.js";
 
 const STATE_VERSION = "noopolis.daimon.schedule-state.v1" as const;
 const STATE_FILE = "schedule-state.v1.json";
-const MAX_STATE_BYTES = 256 * 1024;
+// State reuses the encoded prompts and repeats each agent ID at most twice.
+// Each slot can add 512 bytes for its key, delivery ID, timestamps and other fields.
+const MAX_STATE_BYTES = 2 * ORGANIZATION_RUNTIME_MAX_CONFIG_BYTES + 2 * ORGANIZATION_RUNTIME_MAX_AGENTS * 512;
 export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const SEARCH_HORIZON_MS = 64 * 366 * 86_400_000;
 const MAX_SEARCH_CHECKS = 1_000_000;
 const CRON_FIELD_BOUNDS = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]] as const;
 
-export type ScheduledOccurrence = Readonly<{ agentId: string; deliveryId: string; occurredAt: string; prompt: string }>;
-type ActiveSchedule = Exclude<OrganizationRuntimeSchedule, { kind: "disabled" }>;
-type Entry = Readonly<{ next_due_ms: number; fire_at_ms?: number; latest_pending?: ScheduledOccurrence }>;
+export type ScheduledOccurrence = Readonly<{ agentId: string; deliveryId: string; occurredAt: string; prompt: string; dream?: true }>;
+type Entry = Readonly<{ next_due_ms: number; fire_at_ms?: number; latest_pending?: ScheduledOccurrence; prefer_dream?: true }>;
 type State = Readonly<{ version: typeof STATE_VERSION; schedules: Record<string, Entry> }>;
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -42,8 +47,20 @@ export function createScheduleController(options: ScheduleControllerOptions): Sc
   const setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
   const clearTimer = options.clearTimer ?? clearTimeout;
   const statePath = path.join(options.acceptanceStorePath, STATE_FILE);
-  const active = options.agents.filter((agent) => agent.schedule && agent.schedule.kind !== "disabled") as Array<OrganizationRuntimeAgentConfig & { schedule: ActiveSchedule }>;
-  const byKey = new Map(active.map((agent) => [identity(agent.id, agent.schedule), agent]));
+  const byKey = new Map<string, ScheduleSlot>();
+  const byAgent = new Map<string, { work?: string; dream?: string }>();
+  for (const agent of options.agents) {
+    const schedule = agent.schedule;
+    const keys: { work?: string; dream?: string } = {};
+    if (schedule !== undefined && schedule.kind !== "disabled") {
+      const key = workScheduleKey(agent.id, schedule);
+      byKey.set(key, { agentId: agent.id, schedule, key });
+      keys.work = key;
+    }
+    const dream = dreamSlot(agent);
+    if (dream !== undefined) { byKey.set(dream.key, dream); keys.dream = dream.key; }
+    if (keys.work !== undefined || keys.dream !== undefined) byAgent.set(agent.id, keys);
+  }
   const timers = new Map<string, Timer>();
   let directory: Awaited<ReturnType<typeof open>> | undefined;
   let state: State = { version: STATE_VERSION, schedules: {} };
@@ -59,9 +76,14 @@ export function createScheduleController(options: ScheduleControllerOptions): Sc
     if (directory === undefined) throw new Error("schedule state directory is unavailable");
     await persist(statePath, state, directory, options.onPersistStageForTest);
   };
-  const nextEntry = (agent: OrganizationRuntimeAgentConfig & { schedule: ActiveSchedule }, anchor: number | undefined, observedNow: number, latest_pending?: ScheduledOccurrence): Entry => {
-    const next_due_ms = nextOccurrence(agent.id, agent.schedule, anchor, observedNow);
-    return withFireTarget({ next_due_ms, ...(latest_pending === undefined ? {} : { latest_pending }) }, agent.schedule, random);
+  const nextEntry = (slot: ScheduleSlot, anchor: number | undefined, observedNow: number, latest_pending?: ScheduledOccurrence, prefer_dream?: true): Entry => {
+    const next_due_ms = nextOccurrence(slot.agentId, slot.schedule, anchor, observedNow);
+    return withFireTarget({ next_due_ms, ...(latest_pending === undefined ? {} : { latest_pending }), ...(prefer_dream === undefined ? {} : { prefer_dream }) }, slot.schedule, random);
+  };
+  const elapsedEntry = (slot: ScheduleSlot, entry: Entry, observedNow: number): Entry => {
+    const elapsed = latestEligibleOccurrence(slot.schedule, entry.next_due_ms, observedNow);
+    const pending = newer(entry.latest_pending, slotOccurrence(slot, elapsed));
+    return nextEntry(slot, elapsed, observedNow, pending, entry.prefer_dream);
   };
   const arm = (key: string): void => {
     const prior = timers.get(key);
@@ -75,27 +97,55 @@ export function createScheduleController(options: ScheduleControllerOptions): Sc
     timer.unref?.();
     timers.set(key, timer);
   };
-  const drainKey = async (key: string): Promise<void> => {
-    if (stopped) return;
+  const drainKey = async (key: string | undefined, pairedDreamKey: string | undefined): Promise<void> => {
+    if (key === undefined || stopped) return;
     const pending = state.schedules[key]?.latest_pending;
     if (pending === undefined) return;
     const accepted = await options.accept(pending);
     if (accepted === false || stopped) return;
     const current = state.schedules[key];
     if (current?.latest_pending?.deliveryId !== pending.deliveryId) return;
-    state = { ...state, schedules: { ...state.schedules, [key]: withoutPending(current) } };
+    const { latest_pending, ...rest } = current;
+    const next = { ...state.schedules, [key]: rest };
+    if (pairedDreamKey !== undefined) {
+      // Keep the cursor on the dream slot so ordinary schedule state stays compatible.
+      const { prefer_dream, ...dream } = next[pairedDreamKey]!;
+      next[pairedDreamKey] = key === pairedDreamKey ? dream : { ...dream, prefer_dream: true };
+    }
+    state = { ...state, schedules: next };
     await save();
+  };
+  const drainAgent = async (agentId: string): Promise<void> => {
+    const slots = byAgent.get(agentId);
+    if (slots === undefined) return;
+    const { work, dream } = slots;
+    const pair = work === undefined ? undefined : dream;
+    const preferDream = pair !== undefined && state.schedules[pair]?.prefer_dream === true;
+    await drainKey(preferDream ? dream : work, pair);
+    await drainKey(preferDream ? work : dream, pair);
   };
   const onTimer = async (key: string): Promise<void> => {
     if (stopped) return;
-    const agent = byKey.get(key); const entry = state.schedules[key];
-    if (agent === undefined || entry === undefined) return;
+    const slot = byKey.get(key); const entry = state.schedules[key];
+    if (slot === undefined || entry === undefined) return;
     const observedNow = now();
     const fireAt = entry.fire_at_ms ?? entry.next_due_ms;
     if (fireAt > observedNow) { arm(key); return; }
-    const elapsed = latestEligibleOccurrence(agent.schedule, entry.next_due_ms, observedNow);
-    state = { ...state, schedules: { ...state.schedules, [key]: nextEntry(agent, elapsed, observedNow, occurrenceFor(agent.id, agent.schedule, elapsed)) } };
-    await save(); arm(key); await drainKey(key);
+    const { work, dream } = byAgent.get(slot.agentId)!;
+    const next = { ...state.schedules };
+    const due: string[] = [];
+    // Coalesce both due slots before picking which pending occurrence to admit.
+    for (const id of [work, dream]) {
+      if (id === undefined) continue;
+      const prior = next[id]!;
+      if ((prior.fire_at_ms ?? prior.next_due_ms) > observedNow) continue;
+      next[id] = elapsedEntry(byKey.get(id)!, prior, observedNow);
+      due.push(id);
+    }
+    state = { ...state, schedules: next };
+    await save();
+    for (const id of due) arm(id);
+    await drainAgent(slot.agentId);
   };
 
   return {
@@ -106,24 +156,26 @@ export function createScheduleController(options: ScheduleControllerOptions): Sc
         state = await restore(statePath, byKey);
         const next = { ...state.schedules };
         const observedNow = now();
-        for (const [key, agent] of byKey) {
+        for (const [key, slot] of byKey) {
           const prior = next[key];
-          if (prior === undefined) next[key] = nextEntry(agent, undefined, observedNow);
+          if (prior === undefined) next[key] = nextEntry(slot, undefined, observedNow);
           else if ((prior.fire_at_ms ?? prior.next_due_ms) <= observedNow) {
-            const elapsed = latestEligibleOccurrence(agent.schedule, prior.next_due_ms, observedNow);
-            const pending = occurrenceFor(agent.id, agent.schedule, elapsed);
-            next[key] = nextEntry(agent, elapsed, observedNow, newer(prior.latest_pending, pending));
+            next[key] = elapsedEntry(slot, prior, observedNow);
           } else if (prior.fire_at_ms === undefined) {
-            next[key] = withFireTarget(prior, agent.schedule, random);
+            next[key] = withFireTarget(prior, slot.schedule, random);
           }
         }
         state = { version: STATE_VERSION, schedules: next };
         await save();
         for (const key of byKey.keys()) arm(key);
-        for (const key of byKey.keys()) await drainKey(key);
+        for (const agentId of byAgent.keys()) await drainAgent(agentId);
       });
     },
-    async drain(agentId?: string): Promise<void> { await enqueue(async () => { for (const [key, agent] of byKey) if (agentId === undefined || agent.id === agentId) await drainKey(key); }); },
+    async drain(agentId?: string): Promise<void> {
+      await enqueue(async () => {
+        for (const id of agentId === undefined ? byAgent.keys() : [agentId]) await drainAgent(id);
+      });
+    },
     async stop(): Promise<void> {
       stopped = true;
       for (const timer of timers.values()) clearTimer(timer);
@@ -133,16 +185,22 @@ export function createScheduleController(options: ScheduleControllerOptions): Sc
 }
 
 export function occurrenceFor(agentId: string, schedule: ActiveSchedule, at: number): ScheduledOccurrence {
-  assertTaskInstant(at);
-  const local = schedule.kind === "cron" ? occurrenceForOffset(at, schedule.timezone) : new Date(at).toISOString();
-  return { agentId, occurredAt: new Date(at).toISOString(), prompt: schedule.prompt, deliveryId: `schedule:${identity(agentId, schedule)}:${local}` };
+  return slotOccurrence({ agentId, schedule, key: workScheduleKey(agentId, schedule) }, at);
 }
 
-export function isCanonicalScheduleDeliveryId(value: string): boolean {
-  if (value.length > 256 || !/^schedule:[a-f0-9]{64}:/u.test(value)) return false;
-  const occurrence = value.slice("schedule:".length + 64 + 1);
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(occurrence)
-    || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}@(?:GMT(?:[+-]\d{2}:\d{2})?|UTC)$/u.test(occurrence);
+/** Validate an accepted native dream against the currently configured schedule and memory bank. */
+export function isCurrentDreamOccurrence(agent: OrganizationRuntimeAgentConfig, deliveryId: string, occurredAt: string, prompt: string): boolean {
+  const slot = dreamSlot(agent);
+  const at = Date.parse(occurredAt);
+  return slot !== undefined && slot.schedule.prompt === prompt && validTaskInstant(at) && new Date(at).toISOString() === occurredAt
+    && matchesDreamInstant(slot.schedule, at) && slotOccurrence(slot, at).deliveryId === deliveryId;
+}
+
+function slotOccurrence({ agentId, schedule, key, dream }: ScheduleSlot, at: number): ScheduledOccurrence {
+  assertTaskInstant(at);
+  const local = schedule.kind === "cron" ? occurrenceForOffset(at, schedule.timezone) : new Date(at).toISOString();
+  const prefix = dream ? DREAM_DELIVERY_PREFIX : "schedule:";
+  return { agentId, occurredAt: new Date(at).toISOString(), prompt: schedule.prompt, deliveryId: `${prefix}${key}:${local}`, ...(dream === true ? { dream } : {}) };
 }
 
 export function nextOccurrence(agentId: string, schedule: ActiveSchedule, anchor: number | undefined, from: number): number {
@@ -172,10 +230,6 @@ export function jitterOffsetMs(schedule: ActiveSchedule | undefined, random: () 
 function withFireTarget(entry: Entry, schedule: ActiveSchedule, random: () => number): Entry {
   const offset = jitterOffsetMs(schedule, random);
   return offset === 0 ? entry : { ...entry, fire_at_ms: assertTaskInstant(entry.next_due_ms + offset) };
-}
-
-function withoutPending(entry: Entry): Entry {
-  return { next_due_ms: entry.next_due_ms, ...(entry.fire_at_ms === undefined ? {} : { fire_at_ms: entry.fire_at_ms }) };
 }
 
 function latestEligibleOccurrence(schedule: ActiveSchedule, due: number, at: number): number {
@@ -252,12 +306,14 @@ function occurrenceForOffset(at: number, zone: string): string {
   if (offset === undefined) { offset = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longOffset" }); formatters.set(key, offset); }
   return `${local}@${offset.formatToParts(at).find((part) => part.type === "timeZoneName")?.value ?? "UTC"}`;
 }
-function identity(agentId: string, schedule: OrganizationRuntimeSchedule): string { return createHash("sha256").update(JSON.stringify({ agentId, schedule })).digest("hex"); }
+function matchesDreamInstant(schedule: ActiveSchedule, at: number): boolean {
+  return schedule.kind === "every" || (at % 60_000 === 0 && matches(parseCron(schedule.cron), parts(at, schedule.timezone)));
+}
 function newer(left: ScheduledOccurrence | undefined, right: ScheduledOccurrence): ScheduledOccurrence { return left !== undefined && Date.parse(left.occurredAt) > Date.parse(right.occurredAt) ? left : right; }
 
 async function restore(
   file: string,
-  allowed: ReadonlyMap<string, OrganizationRuntimeAgentConfig & { schedule: ActiveSchedule }>
+  allowed: ReadonlyMap<string, ScheduleSlot>
 ): Promise<State> {
   let bytes: Buffer;
   try {
@@ -273,43 +329,47 @@ async function restore(
   const schedules: Record<string, Entry> = {};
   for (const [key, raw] of Object.entries(root.schedules as Record<string, unknown>)) {
     if (!/^[a-f0-9]{64}$/u.test(key)) throw new Error("schedule state is invalid");
-    if (!allowed.has(key)) continue;
+    const slot = allowed.get(key);
+    if (slot === undefined) continue;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("schedule state is invalid");
-    const entry = raw as Record<string, unknown>; const keys = Object.keys(entry).sort().join();
+    const { prefer_dream, ...entry } = raw as Record<string, unknown>;
+    const keys = Object.keys(entry).sort().join();
+    if (prefer_dream !== undefined && (slot.dream !== true || prefer_dream !== true)) throw new Error("schedule state is invalid");
     if (!["fire_at_ms,next_due_ms", "fire_at_ms,latest_pending,next_due_ms", "latest_pending,next_due_ms", "next_due_ms"].includes(keys)) throw new Error("schedule state is invalid");
     if (!validTaskInstant(entry.next_due_ms)) throw new Error("schedule state is invalid");
     const nextDue = entry.next_due_ms as number;
     const fireAt = entry.fire_at_ms;
     if (fireAt !== undefined) {
-      const maximumFireAt = nextDue + jitterOffsetMs(allowed.get(key)!.schedule, () => 0.999_999_999);
+      const maximumFireAt = nextDue + jitterOffsetMs(slot.schedule, () => 0.999_999_999);
       if (!validTaskInstant(fireAt) || fireAt < nextDue || fireAt > maximumFireAt) throw new Error("schedule state is invalid");
     }
     const pending = entry.latest_pending === undefined ? undefined : parseOccurrence(entry.latest_pending);
-    if (pending !== undefined) assertRestoredOccurrence(key, allowed.get(key)!, pending, nextDue);
-    schedules[key] = { next_due_ms: nextDue, ...(fireAt === undefined ? {} : { fire_at_ms: fireAt as number }), ...(pending === undefined ? {} : { latest_pending: pending }) };
+    if (pending !== undefined) assertRestoredOccurrence(slot, pending, nextDue);
+    schedules[key] = { next_due_ms: nextDue, ...(fireAt === undefined ? {} : { fire_at_ms: fireAt as number }), ...(pending === undefined ? {} : { latest_pending: pending }), ...(prefer_dream === undefined ? {} : { prefer_dream }) };
   }
   return { version: STATE_VERSION, schedules };
 }
 function assertRestoredOccurrence(
-  key: string,
-  agent: OrganizationRuntimeAgentConfig & { schedule: ActiveSchedule },
+  slot: ScheduleSlot,
   pending: ScheduledOccurrence,
   nextDue: number
 ): void {
   const occurred = Date.parse(pending.occurredAt);
-  const expected = occurrenceFor(agent.id, agent.schedule, occurred);
-  if (pending.agentId !== agent.id || pending.prompt !== agent.schedule.prompt ||
-      pending.deliveryId !== expected.deliveryId || !pending.deliveryId.startsWith(`schedule:${key}:`) ||
-      nextDue !== nextOccurrence(agent.id, agent.schedule, occurred, occurred)) {
+  const expected = slotOccurrence(slot, occurred);
+  if (pending.agentId !== expected.agentId || pending.prompt !== expected.prompt || pending.dream !== expected.dream ||
+      pending.deliveryId !== expected.deliveryId || (slot.dream === true && !matchesDreamInstant(slot.schedule, occurred)) ||
+      nextDue !== nextOccurrence(slot.agentId, slot.schedule, occurred, occurred)) {
     throw new Error("schedule state is invalid");
   }
 }
 function parseOccurrence(value: unknown): ScheduledOccurrence {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("schedule state is invalid");
   const item = value as Record<string, unknown>;
-  if (Object.keys(item).sort().join() !== "agentId,deliveryId,occurredAt,prompt" || Object.values(item).some((entry) => typeof entry !== "string" || Buffer.byteLength(entry, "utf8") > 16_384)) throw new Error("schedule state is invalid");
-  const occurredAt = item.occurredAt as string;
-  if (!validTaskInstant(Date.parse(occurredAt)) || new Date(occurredAt).toISOString() !== occurredAt || !/^schedule:[a-f0-9]{64}:/u.test(item.deliveryId as string)) throw new Error("schedule state is invalid");
+  const { dream, ...fields } = item;
+  if ((Object.hasOwn(item, "dream") && dream !== true) || Object.keys(fields).sort().join() !== "agentId,deliveryId,occurredAt,prompt"
+      || Object.values(fields).some((entry) => typeof entry !== "string" || Buffer.byteLength(entry, "utf8") > 16_384)) throw new Error("schedule state is invalid");
+  const occurredAt = fields.occurredAt as string;
+  if (!validTaskInstant(Date.parse(occurredAt)) || new Date(occurredAt).toISOString() !== occurredAt || !isCanonicalScheduleDeliveryId(fields.deliveryId as string)) throw new Error("schedule state is invalid");
   return item as unknown as ScheduledOccurrence;
 }
 async function persist(file: string, value: State, directory: Awaited<ReturnType<typeof open>>, observe?: ScheduleControllerOptions["onPersistStageForTest"]): Promise<void> {

@@ -36,6 +36,7 @@ type HostReadiness = OrganizationRuntimeHostReadiness;
 export type ProductionHostOptions = Readonly<{ sharedProtectedPaths?: readonly string[] }>;
 type WakeJob = {
   readonly request: OrganizationRuntimeWakeRequest;
+  readonly event: WakeEvent;
   readonly resolve: (result: OrganizationRuntimeWakeResult) => void;
   settled: boolean;
   aborting: boolean;
@@ -147,7 +148,7 @@ function createHost(
         agent.state = "running";
         addActivity(agent.config.id, "wake_started", job.request.event.id);
         try {
-          const result = await agent.handle!.wake(toCoreWake(job.request));
+          const result = await agent.handle!.wake(job.event);
           if (!job.settled && !job.aborting) {
             agent.state = "idle";
             addActivity(agent.config.id, "wake_completed", job.request.event.id);
@@ -263,7 +264,7 @@ function createHost(
       return rejected(parsed, "queue_full");
     }
     return new Promise<OrganizationRuntimeWakeResult>((resolve) => {
-      const job: WakeJob = { request: parsed, resolve, settled: false, aborting: false };
+      const job: WakeJob = { request: parsed, event: toCoreWake(parsed, durable === "dream"), resolve, settled: false, aborting: false };
       agent.pending.push(job);
       void drain(agent);
     });
@@ -345,10 +346,9 @@ function createHost(
   });
 }
 
-function toCoreWake(request: OrganizationRuntimeWakeRequest): WakeEvent {
-  return {
-    id: request.event.id, kind: request.event.kind === "external" ? "manual" : request.event.kind, text: request.event.text
-  };
+function toCoreWake(request: OrganizationRuntimeWakeRequest, dream: boolean): WakeEvent {
+  const kind = request.event.kind === "external" ? "manual" : request.event.kind;
+  return { id: request.event.id, kind: dream ? "dream" : kind, text: request.event.text };
 }
 function agentHealthState(agent: HostedAgent): OrganizationRuntimeAgentHealth["state"] {
   const status: AgentStatus | undefined = agent.handle?.status();

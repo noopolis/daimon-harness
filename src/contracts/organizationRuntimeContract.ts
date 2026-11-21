@@ -109,7 +109,7 @@ export const ORGANIZATION_RUNTIME_SCHEDULE_SCHEMA = {
   ]
 } as const;
 
-/** v2 adds exactly one normalized schedule to every agent; v1 stays unchanged. */
+/** v2 gives each agent a work schedule and its memory bank an optional dream schedule. */
 export const ORGANIZATION_RUNTIME_CONFIG_V2_SCHEMA = {
   ...ORGANIZATION_RUNTIME_CONFIG_SCHEMA,
   $id: ORGANIZATION_RUNTIME_V2_VERSION,
@@ -123,7 +123,14 @@ export const ORGANIZATION_RUNTIME_CONFIG_V2_SCHEMA = {
         required: [...ORGANIZATION_RUNTIME_CONFIG_SCHEMA.properties.agents.items.required, "schedule"],
         properties: {
           ...ORGANIZATION_RUNTIME_CONFIG_SCHEMA.properties.agents.items.properties,
-          schedule: ORGANIZATION_RUNTIME_SCHEDULE_SCHEMA
+          schedule: ORGANIZATION_RUNTIME_SCHEDULE_SCHEMA,
+          memory: {
+            ...PRODUCTION_TOOL_PROPERTIES.memory,
+            properties: {
+              ...PRODUCTION_TOOL_PROPERTIES.memory.properties,
+              dreamSchedule: ORGANIZATION_RUNTIME_SCHEDULE_SCHEMA
+            }
+          }
         }
       }
     }

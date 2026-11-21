@@ -51,7 +51,12 @@ export type OrganizationRuntimeCodexSandboxPolicy = Readonly<{ mode: "workspace-
 export type OrganizationRuntimeEngineIntent = Readonly<{ kind: OrganizationRuntimeEngineKind; model?: string; reasoningEffort?: string; codexSandbox?: OrganizationRuntimeCodexSandboxPolicy; /** Codex and AGY only: wall-clock bound on one turn. */ turnTimeoutMs?: number }>;
 export type OrganizationRuntimeMcpServer = Readonly<{ name: string; transport: "stdio" | "sse" | "streamable_http"; command?: string; args: readonly string[]; env: Readonly<Record<string, string>>; authSecretEnv?: string; url?: string; tools: readonly string[] }>;
 export type OrganizationRuntimeMoltnet = Readonly<{ cliPath: string; configPath: string; networks: readonly Readonly<{ id: string; rooms: readonly string[]; dms: boolean }>[] }>;
-export type OrganizationRuntimeMemory = Readonly<{ runtimeHomePath: string; source?: string; tokenBudget?: number }>;
+export type OrganizationRuntimeMemory = Readonly<{
+  runtimeHomePath: string;
+  source?: string;
+  tokenBudget?: number;
+  dreamSchedule?: OrganizationRuntimeSchedule;
+}>;
 export type OrganizationRuntimeSchedule =
   | Readonly<{ kind: "disabled" }>
   | Readonly<{ kind: "every"; interval_ms: number; prompt: string; jitter_seconds?: number }>

@@ -23,7 +23,7 @@ export type AttentionRegistry = Map<string, AttentionTurn>;
 export function taskClockAttentionMessages(records: readonly Pick<StoredWakeAcceptanceRecord, "acceptance_id" | "delivery_id" | "event" | "native_schedule">[]): readonly AttentionMessage[] {
   const clock = readTaskClock();
   return records.map((record) => ({ acceptance_id: record.acceptance_id, delivery_id: record.delivery_id, ...record.event,
-    occurred_at: record.native_schedule === true ? record.event.occurred_at : taskClockTimestamp(record.event.occurred_at, clock)
+    occurred_at: record.native_schedule !== undefined ? record.event.occurred_at : taskClockTimestamp(record.event.occurred_at, clock)
   }));
 }
 

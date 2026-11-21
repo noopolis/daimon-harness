@@ -177,7 +177,6 @@ test("descriptor sandbox capabilities correspond to the real config and rendered
 
 test("manifest v7 emits the static inventory and preserves legacy aliases", () => {
   assert.equal(RUNTIME_CONTRACT_MANIFEST.version, "noopolis.daimon.runtime-contract-manifest.v7");
-  assert.equal(sha256(`${canonicalJson(RUNTIME_CONTRACT_MANIFEST)}\n`), "534ed1b375f7cc97056c16cea61cd89659b5d6286370f10c81871f8a1c1916bd");
   assert.equal(RUNTIME_CONTRACT_MANIFEST.engines, ENGINE_DESCRIPTORS);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokEngineBroker, grok.broker);
   assert.equal(RUNTIME_CONTRACT_MANIFEST.grokSubscriptionRealm, grok.auth.realm);
@@ -185,8 +184,12 @@ test("manifest v7 emits the static inventory and preserves legacy aliases", () =
   assert.equal(RUNTIME_CONTRACT_MANIFEST.engineCredentialMaterial.codex, ENGINE_DESCRIPTORS.codex.credentialMaterial);
 });
 
-test("manifest v7 retains every released v5 section byte-for-byte canonically", () => {
-  const { engines: _engines, codexSubscriptionRealm: _codexRealm, ...legacy } = RUNTIME_CONTRACT_MANIFEST;
+test("omitting the dream schedule reproduces the previous v7 contract and its v5 projection", () => {
+  const previous = structuredClone(RUNTIME_CONTRACT_MANIFEST);
+  const memory = previous.organizationRuntimeConfigV2Schema.properties.agents.items.properties.memory;
+  Reflect.deleteProperty(memory.properties, "dreamSchedule");
+  assert.equal(sha256(`${canonicalJson(previous)}\n`), "534ed1b375f7cc97056c16cea61cd89659b5d6286370f10c81871f8a1c1916bd");
+  const { engines: _engines, codexSubscriptionRealm: _codexRealm, ...legacy } = previous;
   const v5 = { ...legacy, version: "noopolis.daimon.runtime-contract-manifest.v5" };
   assert.equal(sha256(`${canonicalJson(v5)}\n`), "0e401c235b44e2c13b7b81676982e04d933de98d15c204141af3a715c07b5ebe");
 });

@@ -28,7 +28,7 @@ Both require a host and one to 32 agents. Each agent has:
 - absolute `workspacePath` and `runtimeHomePath`.
 - `engine.kind` of `codex`, `grok`, or `agy`.
 - optional `mcp`, `moltnet`, `memory`, `attention`, and `recording`.
-- for v2 only, one `schedule`.
+- for v2, a work `schedule` and an optional `memory.dreamSchedule`.
 
 Configuration must not contain credentials, arbitrary environment maps, command
 arrays for engines, process handles, roles, teams, or parent/member links. The
@@ -455,6 +455,11 @@ Version 2 schedules are normalized on the agent:
 
 Optional `jitter_seconds` is bounded to one hour. Schedules are runtime-native
 delivery sources; they do not give Daimon org-graph authority.
+
+The durable control host applies the same interval and cron formats to
+`memory.dreamSchedule`. Each bank review gets a separate turn. The timer
+keeps its own pending occurrence across restarts. Replacing the bank or its
+schedule retires pending dreams from the previous configuration.
 
 `reconcileOfflineWakeTransition` is a library operation for deployment-admin
 recovery of a blocked durable store. It is not an HTTP endpoint or normal host

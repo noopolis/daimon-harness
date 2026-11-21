@@ -16,7 +16,7 @@ export type StoredWakeAcceptanceRecord = Readonly<{
   acceptance_id: string; agent_id: string; delivery_id: string; request_digest: string;
   event: OrganizationRuntimeWakeAcceptanceRequest["event"]; state: WakeReceiptState;
   /** Set only through native scheduler acceptance; absent means a real delivery instant. */
-  native_schedule?: true;
+  native_schedule?: true | "dream";
   accepted_at: string; updated_at: string; claim_generation?: string; execution_id?: string; deferred?: boolean; execution_error?: string; code?: WakeReceiptCode; text?: string;
 }>;
 
@@ -32,7 +32,7 @@ export function parseStoredWakeAcceptance(value: unknown, maxTextBytes?: number)
   const keys = ["acceptance_id", "agent_id", "delivery_id", "request_digest", "event", "state", "accepted_at", "updated_at", "claim_generation", "execution_id", "deferred", "execution_error", "code", "text", "native_schedule"];
   if (Object.keys(record).some((key) => !keys.includes(key))) throw new Error("wake acceptance record is invalid");
   const parsed = parseWakeAcceptanceRequest({ token: undefined, agent_id: string(record.agent_id), delivery_id: string(record.delivery_id), event: record.event }, maxTextBytes);
-  if (record.native_schedule !== undefined && (record.native_schedule !== true || parsed.event.kind !== "schedule")) throw new Error("wake acceptance schedule provenance is invalid");
+  if (record.native_schedule !== undefined && ((record.native_schedule !== true && record.native_schedule !== "dream") || parsed.event.kind !== "schedule")) throw new Error("wake acceptance schedule provenance is invalid");
   const state = string(record.state) as WakeReceiptState;
   if (!(["accepted", "running", "completed", "failed", "stopped"] as const).includes(state)) throw new Error("wake acceptance record is invalid");
   const code = record.code === undefined ? undefined : string(record.code) as WakeReceiptCode;
@@ -52,7 +52,7 @@ export function parseStoredWakeAcceptance(value: unknown, maxTextBytes?: number)
   if ((state === "failed" || state === "stopped") && code === undefined) throw new Error("wake acceptance record is invalid");
   if ((state !== "completed" && state !== "failed" && completionText !== undefined) || completionText !== record.text) throw new Error("wake acceptance record is invalid");
   if (string(record.request_digest) !== wakeAcceptanceDigest(parsed) || !uuid(string(record.acceptance_id))) throw new Error("wake acceptance record is invalid");
-  return { acceptance_id: string(record.acceptance_id), agent_id: parsed.agent_id, delivery_id: parsed.delivery_id, request_digest: string(record.request_digest), event: parsed.event, state, accepted_at: timestamp(record.accepted_at), updated_at: timestamp(record.updated_at), ...(record.native_schedule === true ? { native_schedule: true } : {}), ...(claimGeneration === undefined ? {} : { claim_generation: claimGeneration }), ...(executionId === undefined ? {} : { execution_id: executionId }), ...(record.deferred === undefined ? {} : { deferred: record.deferred as boolean }), ...(code === undefined ? {} : { code }), ...(completionText === undefined ? {} : { text: completionText }), ...(executionError === undefined ? {} : { execution_error: executionError }) };
+  return { acceptance_id: string(record.acceptance_id), agent_id: parsed.agent_id, delivery_id: parsed.delivery_id, request_digest: string(record.request_digest), event: parsed.event, state, accepted_at: timestamp(record.accepted_at), updated_at: timestamp(record.updated_at), ...(record.native_schedule === undefined ? {} : { native_schedule: record.native_schedule }), ...(claimGeneration === undefined ? {} : { claim_generation: claimGeneration }), ...(executionId === undefined ? {} : { execution_id: executionId }), ...(record.deferred === undefined ? {} : { deferred: record.deferred as boolean }), ...(code === undefined ? {} : { code }), ...(completionText === undefined ? {} : { text: completionText }), ...(executionError === undefined ? {} : { execution_error: executionError }) };
 }
 function string(value: unknown): string { if (typeof value !== "string") throw new Error("wake acceptance record is invalid"); return value; }
 function timestamp(value: unknown): string { const result = string(value); if (Number.isNaN(Date.parse(result)) || new Date(result).toISOString() !== result) throw new Error("wake acceptance record is invalid"); return result; }

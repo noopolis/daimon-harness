@@ -91,6 +91,19 @@ test("v2 cron schedules reject out-of-range and unsupported syntax", () => {
   }
 });
 
+test("v2 validates a memory dream schedule independently from the work schedule", () => {
+  const source = valid();
+  const memory = { runtimeHomePath: "/runtime/memory/editor", dreamSchedule: { kind: "every", interval_ms: 60000, prompt: "Review memories." } };
+  const agent = { ...source.agents[0]!, memory };
+  const scheduled = { ...source, version: "noopolis.daimon.organization-runtime.v2", agents: [{ ...agent, schedule: { kind: "disabled" } }] };
+  const parsed = parseOrganizationRuntimeConfig(scheduled).agents[0]!;
+  assert.deepEqual(parsed.memory, memory);
+  assert.deepEqual(parsed.schedule, { kind: "disabled" });
+  assert.throws(() => parseOrganizationRuntimeConfig({ ...source, agents: [agent] }), /memory has invalid fields/);
+  const impossible = { ...memory, dreamSchedule: { kind: "cron", cron: "0 0 31 2 *", timezone: "UTC", prompt: "Review" } };
+  assert.throws(() => parseOrganizationRuntimeConfig({ ...scheduled, agents: [{ ...scheduled.agents[0], memory: impossible }] }), /dreamSchedule.cron is invalid or impossible/);
+});
+
 test("v2 schedules reject impossible cron, oversized prompt, and out-of-range cadence", () => {
   const source = valid();
   const scheduled = (schedule: unknown) => ({ ...source, version: "noopolis.daimon.organization-runtime.v2", agents: [{ ...source.agents[0], schedule }] });
