@@ -88,7 +88,7 @@ function parseAgent(value: unknown, label: string, v2: boolean): OrganizationRun
     ...(v2 ? { schedule: schedule(agent.schedule, `${label}.schedule`) } : {}),
     ...(agent.mcp === undefined ? {} : { mcp: mcpServers(agent.mcp, `${label}.mcp`) }),
     ...(agent.moltnet === undefined ? {} : { moltnet: moltnet(agent.moltnet, `${label}.moltnet`) }),
-    ...(agent.memory === undefined ? {} : { memory: memory(agent.memory, `${label}.memory`) })
+    ...(agent.memory === undefined ? {} : { memory: memory(agent.memory, `${label}.memory`, v2) })
   };
 }
 
@@ -116,12 +116,14 @@ function moltnet(value: unknown, label: string): NonNullable<OrganizationRuntime
   return { cliPath: absolute(item.cliPath, `${label}.cliPath`), configPath: absolute(item.configPath, `${label}.configPath`), networks };
 }
 
-function memory(value: unknown, label: string): NonNullable<OrganizationRuntimeAgentConfig["memory"]> {
-  const item = object(value, label); exactOptional(item, ["runtimeHomePath"], ["source", "tokenBudget"], label);
+function memory(value: unknown, label: string, v2: boolean): NonNullable<OrganizationRuntimeAgentConfig["memory"]> {
+  const item = object(value, label);
+  exactOptional(item, ["runtimeHomePath"], v2 ? ["source", "tokenBudget", "dreamSchedule"] : ["source", "tokenBudget"], label);
   return {
     runtimeHomePath: absolute(item.runtimeHomePath, `${label}.runtimeHomePath`),
     ...(item.source === undefined ? {} : { source: nonEmpty(item.source, `${label}.source`) }),
-    ...(item.tokenBudget === undefined ? {} : { tokenBudget: tokenBudget(item.tokenBudget, `${label}.tokenBudget`) })
+    ...(item.tokenBudget === undefined ? {} : { tokenBudget: tokenBudget(item.tokenBudget, `${label}.tokenBudget`) }),
+    ...(item.dreamSchedule === undefined ? {} : { dreamSchedule: schedule(item.dreamSchedule, `${label}.dreamSchedule`) })
   };
 }
 

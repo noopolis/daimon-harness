@@ -11,6 +11,9 @@ test("runtime contract manifest is data-only and deterministic", () => {
   assert.deepEqual(RUNTIME_CONTRACT_MANIFEST.supportedEngineKinds, ["agy", "codex", "grok"]);
   assert.equal(RUNTIME_CONTRACT_MANIFEST_VERSION, "noopolis.daimon.runtime-contract-manifest.v7");
   assert.equal(RUNTIME_CONTRACT_MANIFEST.organizationRuntimeConfigV2Schema.$id, "noopolis.daimon.organization-runtime.v2");
+  const v2 = RUNTIME_CONTRACT_MANIFEST.organizationRuntimeConfigV2Schema.properties.agents.items.properties;
+  assert.deepEqual(v2.memory.properties.dreamSchedule, v2.schedule);
+  assert.ok(!Object.hasOwn(RUNTIME_CONTRACT_MANIFEST.organizationRuntimeConfigSchema.properties.agents.items.properties.memory.properties, "dreamSchedule"));
   assert.deepEqual(RUNTIME_CONTRACT_MANIFEST.wakeAcceptanceTypes, ["manual", "message", "schedule", "external"]);
   assert.deepEqual(RUNTIME_CONTRACT_MANIFEST.deliverySemantics, {
     activeDeliveryIdempotency: "unbounded-until-terminal", terminalReceiptHorizon: 2_048,
